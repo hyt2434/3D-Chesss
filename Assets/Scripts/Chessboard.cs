@@ -273,6 +273,7 @@ public class Chessboard : MonoBehaviour
     public void OnRestartButton()
     {
         // hide victory UI
+        winningScreen.transform.GetChild(2).gameObject.SetActive(false);
         winningScreen.transform.GetChild(0).gameObject.SetActive(false);
         winningScreen.transform.GetChild(1).gameObject.SetActive(false);
         winningScreen.SetActive(false);
@@ -497,13 +498,13 @@ public class Chessboard : MonoBehaviour
             moves.Remove(movesToRemove[i]);
         }
     }
-    private bool CHECKMATE()
+    private int CHECKMATE()
     {
         var lastMove = moveList[moveList.Count - 1];
         int targetTeam = (chessPieces[lastMove[1].x, lastMove[1].y].team == 0) ? 1 : 0;
 
-        List<ChessPiece> attackingPieces = new List<ChessPiece>();  
-        List<ChessPiece> defendingPieces = new List<ChessPiece>();  
+        List<ChessPiece> attackingPieces = new List<ChessPiece>();
+        List<ChessPiece> defendingPieces = new List<ChessPiece>();
         ChessPiece targetKing = null;
         for (int i = 0; i < TILE_COUNT_X; i++)
             for (int j = 0; j < TILE_COUNT_Y; j++)
@@ -520,14 +521,14 @@ public class Chessboard : MonoBehaviour
                     {
                         attackingPieces.Add(chessPieces[i, j]);
                     }
-                           
+
                 }
         //Is the king being attacked? 
         List<Vector2Int> currentAvailableMoves = new List<Vector2Int>();
         for (int i = 0; i < attackingPieces.Count; i++)
         {
             var pieceMove = attackingPieces[i].GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
-            for (int  b= 0; b < pieceMove.Count; b++)
+            for (int b = 0; b < pieceMove.Count; b++)
                 currentAvailableMoves.Add(pieceMove[b]);
         }
         //Are we in check? 
@@ -539,14 +540,23 @@ public class Chessboard : MonoBehaviour
                 SimulateMoveForSinglePiece(defendingPieces[i], ref defendingMoves, targetKing);
 
                 if (defendingMoves.Count != 0)
-                    return false;
+                    return 0;
             }
-            return true; //checkmate
+            return 1; //checkmate
         }
-        return false;
-                    
+        else
+        {
+            for (int i = 0; i < defendingPieces.Count; i++)
+            {
+                List<Vector2Int> defendingMoves = defendingPieces[i].GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
+                SimulateMoveForSinglePiece(defendingPieces[i], ref defendingMoves, targetKing);
+                if (defendingMoves.Count != 0)
+                    return 0;
+            }
+            return 2; //staleMate Exit
 
 
+        }
     }
 
     // Operations
@@ -613,6 +623,7 @@ public class Chessboard : MonoBehaviour
 
         PositionSinglePiece(x, y);
 
+
         isItWhiteTurn = !isItWhiteTurn;
         if (timerManager != null)
         {
@@ -627,9 +638,16 @@ public class Chessboard : MonoBehaviour
 
         CHECKMATE();
 
-        if (CHECKMATE() == true)
+        switch (CHECKMATE())
         {
-            CheckMate(cp.team);
+            default:
+                break;
+            case 1:
+                CheckMate(cp.team);
+                break;
+            case 2:
+                CheckMate(2);
+                break;
         }
 
         return true;
