@@ -11,7 +11,6 @@ public enum SpecialMove
     Castling,
     Promotion
 }
-
 public class Chessboard : MonoBehaviour
 {
     [Header("Art stuff")]
@@ -44,6 +43,7 @@ public class Chessboard : MonoBehaviour
     private bool isItWhiteTurn;
     private List<Vector2Int[]> moveList = new List<Vector2Int[]>();
     public GameTimer timerManager;
+    public ScoreManager scoreManager;
     private void Awake()
     {
         isItWhiteTurn = true;
@@ -588,6 +588,27 @@ public class Chessboard : MonoBehaviour
             {
                 return false; 
             }
+            int value = ocp.type switch
+            {
+                ChessPieceType.Pawn => 1,
+                ChessPieceType.Knight => 3,
+                ChessPieceType.Bishop => 3,
+                ChessPieceType.Rock => 5,  // your "Rock" is a Rook
+                ChessPieceType.Queen => 9,
+                _ => 0
+            };
+
+            // award points
+            if (scoreManager != null)
+            {
+                scoreManager.AddPoints(cp.team, value);
+                Debug.Log($"Awarded {value} points to {(cp.team == 0 ? "White" : "Black")}");
+            }
+            else
+            {
+                Debug.LogError("ScoreManager is null on Chessboard! Did you assign it in the Inspector?");
+            }
+
             // If its enemy piece, we can capture it
             if (ocp.team == 0)
             {
