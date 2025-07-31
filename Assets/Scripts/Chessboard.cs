@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using Random = UnityEngine.Random;
 
 public enum SpecialMove
 {
@@ -22,6 +23,7 @@ public class Chessboard : MonoBehaviour
     [SerializeField] private float deadSpacing = 0.3f;
     [SerializeField] private float dragOffset = 1.5f;
     [SerializeField] private GameObject winningScreen;
+    [SerializeField] private GameManager gameManager;
 
 
     [Header("Prefabs & Materials")]
@@ -305,7 +307,13 @@ public class Chessboard : MonoBehaviour
         if (timerManager != null)
             timerManager.ResetTimers();
     }
-
+    public void TryActivateBot()
+    {
+        if (!isItWhiteTurn && GameManager.Instance.isSinglePlayerMode)
+        {
+            Invoke("MakeRandomAIMove", 0.5f); // 0.5 second delay
+        }
+    }
     public void OnExitButton()
     {
         // go back to your MainMenu scene
@@ -650,6 +658,11 @@ public class Chessboard : MonoBehaviour
         {
             timerManager.SwitchTimer();
         }
+
+        if (!isItWhiteTurn)
+        {
+            MakeRandomAIMove(); //This is critical, it determines if it's the BOT's turn or not.
+        }
             
 
 
@@ -671,9 +684,62 @@ public class Chessboard : MonoBehaviour
                 break;
         }
 
+        TryActivateBot();
+
         return true;
        
     }
+
+    public void MakeRandomAIMove()
+    {
+        if (isItWhiteTurn) return;
+
+        //Find all black pieces with available moves (The bot will always be Black team by default)
+        List<ChessPiece> movablePieces = new List<ChessPiece>(); //Just creating a new list of movable Pieces
+        for (int x = 0; x < TILE_COUNT_X; x++)
+        {
+            for (int y = 0; y < TILE_COUNT_Y; y++)
+            {
+                ChessPiece piece = chessPieces[x, y];
+                if (piece != null && piece.team == 1) //Black pieces
+                {
+                    //Temporarily set as currentlyDragging to use the existing system
+                    currentlyDragging = piece;
+                    availableMoves = piece.GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
+
+                    if (availableMoves.Count > 0)
+                        movablePieces.Add(piece);
+
+                    currentlyDragging = null;
+                    availableMoves = new List<Vector2Int>();
+                }
+            }
+        }
+
+        //Select random piece and move
+        if (movablePieces.Count > 0)
+        {
+            ChessPiece selectedPiece = movablePieces[UnityEngine.Random.Range(0, movablePieces.Count)];
+            currentlyDragging = selectedPiece;
+            availableMoves = selectedPiece.GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
+
+            Vector2Int randomMove = availableMoves[UnityEngine.Random.Range(0, availableMoves.Count)];
+            MoveTo(selectedPiece, randomMove.x, randomMove.y);
+
+            // Clean up
+            currentlyDragging = null;
+            availableMoves = new List<Vector2Int>();
+        }
+        else
+        {
+            //No valid moves - switch turn
+            isItWhiteTurn = true;
+        }
+    }
+
+
+
+
     private Vector2Int LookupTileIndex(GameObject hitInfo)
     {
         for (int x = 0; x < TILE_COUNT_X; x++)
