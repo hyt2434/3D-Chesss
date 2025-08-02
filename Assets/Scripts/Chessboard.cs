@@ -535,63 +535,71 @@ public class Chessboard : MonoBehaviour
     }
     private int CHECKMATE()
     {
-        var lastMove = moveList[moveList.Count - 1];
-        int targetTeam = (chessPieces[lastMove[1].x, lastMove[1].y].team == 0) ? 1 : 0;
+        // 1) If only two kings remain on the board, it's an immediate draw
+        int livePieceCount = 0;
+        for (int x = 0; x < TILE_COUNT_X; x++)
+            for (int y = 0; y < TILE_COUNT_Y; y++)
+                if (chessPieces[x, y] != null)
+                    livePieceCount++;
+        if (livePieceCount == 2)
+            return 2; // 2 = draw
 
-        List<ChessPiece> attackingPieces = new List<ChessPiece>();
-        List<ChessPiece> defendingPieces = new List<ChessPiece>();
-        ChessPiece targetKing = null;
-        for (int i = 0; i < TILE_COUNT_X; i++)
-            for (int j = 0; j < TILE_COUNT_Y; j++)
-                if (chessPieces[i, j] != null)
+        // 2) Determine whose turn it is
+        int teamToMove = isItWhiteTurn ? 0 : 1;
+        int opponentTeam = 1 - teamToMove;
+
+        // 3) Find the king of the side to move
+        ChessPiece king = null;
+        for (int x = 0; x < TILE_COUNT_X && king == null; x++)
+            for (int y = 0; y < TILE_COUNT_Y; y++)
+                if (chessPieces[x, y] != null
+                 && chessPieces[x, y].team == teamToMove
+                 && chessPieces[x, y].type == ChessPieceType.King)
                 {
-                    if (chessPieces[i, j].team == targetTeam)
-                    {
-                        defendingPieces.Add(chessPieces[i, j]);
-                        if (chessPieces[i, j].type == ChessPieceType.King)
-                            targetKing = chessPieces[i, j];
-
-                    }
-                    else
-                    {
-                        attackingPieces.Add(chessPieces[i, j]);
-                    }
-
+                    king = chessPieces[x, y];
+                    break;
                 }
-        //Is the king being attacked? 
-        List<Vector2Int> currentAvailableMoves = new List<Vector2Int>();
-        for (int i = 0; i < attackingPieces.Count; i++)
-        {
-            var pieceMove = attackingPieces[i].GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
-            for (int b = 0; b < pieceMove.Count; b++)
-                currentAvailableMoves.Add(pieceMove[b]);
-        }
-        //Are we in check? 
-        if (ContainsValidMove(ref currentAvailableMoves, new Vector2Int(targetKing.currentX, targetKing.currentY)))
-        {
-            for (int i = 0; i < defendingPieces.Count; i++)
+        if (king == null)
+            return 0; // should never happen
+
+        // 4) Is the king currently in check?
+        Vector2Int kingPos = new Vector2Int(king.currentX, king.currentY);
+        bool inCheck = false;
+        var opponentAttacks = new List<Vector2Int>();
+        for (int x = 0; x < TILE_COUNT_X; x++)
+            for (int y = 0; y < TILE_COUNT_Y; y++)
             {
-                List<Vector2Int> defendingMoves = defendingPieces[i].GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
-                SimulateMoveForSinglePiece(defendingPieces[i], ref defendingMoves, targetKing);
-
-                if (defendingMoves.Count != 0)
-                    return 0;
+                var p = chessPieces[x, y];
+                if (p != null && p.team == opponentTeam)
+                    opponentAttacks.AddRange(p.GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y));
             }
-            return 1; //checkmate
-        }
-        else
+        if (ContainsValidMove(ref opponentAttacks, kingPos))
+            inCheck = true;
+
+        // 5) Does the side to move have any legal (non-leaving-in-check) moves?
+        bool hasLegalMove = false;
+        for (int x = 0; x < TILE_COUNT_X && !hasLegalMove; x++)
         {
-            for (int i = 0; i < defendingPieces.Count; i++)
+            for (int y = 0; y < TILE_COUNT_Y && !hasLegalMove; y++)
             {
-                List<Vector2Int> defendingMoves = defendingPieces[i].GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
-                SimulateMoveForSinglePiece(defendingPieces[i], ref defendingMoves, targetKing);
-                if (defendingMoves.Count != 0)
-                    return 0;
+                var p = chessPieces[x, y];
+                if (p != null && p.team == teamToMove)
+                {
+                    var moves = p.GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
+                    SimulateMoveForSinglePiece(p, ref moves, king);
+                    if (moves.Count > 0)
+                        hasLegalMove = true;
+                }
             }
-            return 2; //staleMate Exit
-
-
         }
+
+        // 6) Decide outcome
+        if (inCheck && !hasLegalMove)
+            return 1; // 1 = checkmate
+        if (!inCheck && !hasLegalMove)
+            return 2; // 2 = stalemate/draw
+
+        return 0; // game continues
     }
 
     // Operations

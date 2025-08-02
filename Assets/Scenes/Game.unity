@@ -340,7 +340,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Material: {fileID: 0}
-  m_Color: {r: 0.23773581, g: 0.12852591, b: 0.07132072, a: 1}
+  m_Color: {r: 0.23773581, g: 0.12852591, b: 0.07132072, a: 0.6117647}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -2604,6 +2604,7 @@ MonoBehaviour:
   deadSpacing: 0.35
   dragOffset: 1
   winningScreen: {fileID: 295795830}
+  gameManager: {fileID: 0}
   prefabs:
   - {fileID: 8551828756444820956, guid: 508dba21f9599b34e98b8ed3586c4a7c, type: 3}
   - {fileID: 8722938610359770989, guid: 6129bd43d9852974d82b0e1d0eb483b1, type: 3}
