@@ -112,10 +112,11 @@ public class Chessboard : MonoBehaviour
                 if (!validMove)
                 {
                     currentlyDragging.SetPosition(GetTileCenter(previousPosition.x, previousPosition.y));
-                    currentlyDragging = null;
                 }
+                
+                // Always clean up and remove highlights after any move attempt
                 currentlyDragging = null;
-                RemoveHighlightTiles();
+                RemoveAllHighlights();
             }
         }
         else
@@ -130,7 +131,7 @@ public class Chessboard : MonoBehaviour
                 // If we are dragging a piece and release the mouse, reset it
                 currentlyDragging.SetPosition(GetTileCenter(currentlyDragging.currentX, currentlyDragging.currentY));
                 currentlyDragging = null;
-                RemoveHighlightTiles();
+                RemoveAllHighlights();
             }
         }
 
@@ -258,6 +259,22 @@ public class Chessboard : MonoBehaviour
         for (int i = 0; i < availableMoves.Count; i++)
         {
             tiles[availableMoves[i].x, availableMoves[i].y].layer = LayerMask.NameToLayer("Tile");
+        }
+        availableMoves.Clear();
+    }
+
+    private void RemoveAllHighlights()
+    {
+        // Clear ALL highlighted tiles on the board, regardless of availableMoves list
+        for (int x = 0; x < TILE_COUNT_X; x++)
+        {
+            for (int y = 0; y < TILE_COUNT_Y; y++)
+            {
+                if (tiles[x, y].layer == LayerMask.NameToLayer("Highlight"))
+                {
+                    tiles[x, y].layer = LayerMask.NameToLayer("Tile");
+                }
+            }
         }
         availableMoves.Clear();
     }
@@ -659,7 +676,7 @@ public class Chessboard : MonoBehaviour
             timerManager.SwitchTimer();
         }
 
-        if (!isItWhiteTurn)
+        if (!isItWhiteTurn && GameManager.Instance.isSinglePlayerMode)
         {
             MakeRandomAIMove(); //This is critical, it determines if it's the BOT's turn or not.
         }
@@ -693,47 +710,297 @@ public class Chessboard : MonoBehaviour
     public void MakeRandomAIMove()
     {
         if (isItWhiteTurn) return;
+        MakeSmartAIMove();
+    }
 
-        //Find all black pieces with available moves (The bot will always be Black team by default)
-        List<ChessPiece> movablePieces = new List<ChessPiece>(); //Just creating a new list of movable Pieces
+    public void MakeSmartAIMove()
+    {
+        if (isItWhiteTurn) return;
+
+        // Find all possible moves for black pieces
+        List<AIMove> allPossibleMoves = GetAllPossibleMoves(1); // 1 = black team
+
+        if (allPossibleMoves.Count == 0)
+        {
+            // No valid moves - switch turn
+            isItWhiteTurn = true;
+            return;
+        }
+
+        // Evaluate all moves and select the best one
+        AIMove bestMove = EvaluateAndSelectBestMove(allPossibleMoves);
+
+        // Execute the best move
+        currentlyDragging = bestMove.piece;
+        availableMoves = bestMove.piece.GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
+        
+        // Apply check prevention
+        ChessPiece targetKing = FindKing(1);
+        if (targetKing != null)
+        {
+            SimulateMoveForSinglePiece(bestMove.piece, ref availableMoves, targetKing);
+        }
+
+        // Verify the move is still valid after check prevention
+        if (ContainsValidMove(ref availableMoves, bestMove.targetPosition))
+        {
+            MoveTo(bestMove.piece, bestMove.targetPosition.x, bestMove.targetPosition.y);
+        }
+        else
+        {
+            // Fallback to any valid move if best move was invalidated
+            if (availableMoves.Count > 0)
+            {
+                Vector2Int fallbackMove = availableMoves[0];
+                MoveTo(bestMove.piece, fallbackMove.x, fallbackMove.y);
+            }
+        }
+
+        // Clean up
+        currentlyDragging = null;
+        RemoveAllHighlights(); // Clear any remaining highlights from player's previous move
+    }
+
+    private List<AIMove> GetAllPossibleMoves(int team)
+    {
+        List<AIMove> allMoves = new List<AIMove>();
+
         for (int x = 0; x < TILE_COUNT_X; x++)
         {
             for (int y = 0; y < TILE_COUNT_Y; y++)
             {
                 ChessPiece piece = chessPieces[x, y];
-                if (piece != null && piece.team == 1) //Black pieces
+                if (piece != null && piece.team == team)
                 {
-                    //Temporarily set as currentlyDragging to use the existing system
-                    currentlyDragging = piece;
-                    availableMoves = piece.GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
+                    List<Vector2Int> pieceMoves = piece.GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
+                    
+                    // Apply check prevention for each piece
+                    ChessPiece king = FindKing(team);
+                    if (king != null)
+                    {
+                        currentlyDragging = piece; // Temporarily set for check prevention
+                        SimulateMoveForSinglePiece(piece, ref pieceMoves, king);
+                        currentlyDragging = null;
+                    }
 
-                    if (availableMoves.Count > 0)
-                        movablePieces.Add(piece);
-
-                    currentlyDragging = null;
-                    availableMoves = new List<Vector2Int>();
+                    foreach (Vector2Int move in pieceMoves)
+                    {
+                        allMoves.Add(new AIMove(piece, move));
+                    }
                 }
             }
         }
 
-        //Select random piece and move
-        if (movablePieces.Count > 0)
+        return allMoves;
+    }
+
+    private AIMove EvaluateAndSelectBestMove(List<AIMove> moves)
+    {
+        float bestScore = float.MinValue;
+        AIMove bestMove = moves[0];
+
+        foreach (AIMove move in moves)
         {
-            ChessPiece selectedPiece = movablePieces[UnityEngine.Random.Range(0, movablePieces.Count)];
-            currentlyDragging = selectedPiece;
-            availableMoves = selectedPiece.GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
-
-            Vector2Int randomMove = availableMoves[UnityEngine.Random.Range(0, availableMoves.Count)];
-            MoveTo(selectedPiece, randomMove.x, randomMove.y);
-
-            // Clean up
-            currentlyDragging = null;
-            availableMoves = new List<Vector2Int>();
+            float score = EvaluateMove(move);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestMove = move;
+            }
         }
-        else
+
+        return bestMove;
+    }
+
+    private float EvaluateMove(AIMove move)
+    {
+        float score = 0f;
+
+        // 1. Capture Value - Prioritize capturing valuable pieces
+        ChessPiece targetPiece = chessPieces[move.targetPosition.x, move.targetPosition.y];
+        if (targetPiece != null && targetPiece.team != move.piece.team)
         {
-            //No valid moves - switch turn
-            isItWhiteTurn = true;
+            score += GetPieceValue(targetPiece.type) * 10f; // High priority for captures
+        }
+
+        // 2. Position Value - Prefer central positions and piece-specific good squares
+        score += EvaluatePositionValue(move.piece.type, move.targetPosition, move.piece.team);
+
+        // 3. Safety - Avoid moves that put pieces in danger
+        score -= EvaluateDanger(move.piece, move.targetPosition) * 5f;
+
+        // 4. King Safety - Prioritize moves that improve king safety
+        score += EvaluateKingSafety(move) * 3f;
+
+        // 5. Piece Development - Encourage moving pieces from starting positions
+        score += EvaluateDevelopment(move) * 2f;
+
+        // 6. Add small random factor to avoid predictable play
+        score += Random.Range(-0.5f, 0.5f);
+
+        return score;
+    }
+
+    private float GetPieceValue(ChessPieceType pieceType)
+    {
+        return pieceType switch
+        {
+            ChessPieceType.Pawn => 1f,
+            ChessPieceType.Knight => 3f,
+            ChessPieceType.Bishop => 3f,
+            ChessPieceType.Rock => 5f,
+            ChessPieceType.Queen => 9f,
+            ChessPieceType.King => 100f, // Very high value but should never be captured
+            _ => 0f
+        };
+    }
+
+    private float EvaluatePositionValue(ChessPieceType pieceType, Vector2Int position, int team)
+    {
+        float score = 0f;
+        int x = position.x;
+        int y = position.y;
+
+        // General center control bonus
+        float centerDistance = Mathf.Sqrt(Mathf.Pow(x - 3.5f, 2) + Mathf.Pow(y - 3.5f, 2));
+        score += (5f - centerDistance) * 0.5f;
+
+        // Piece-specific position bonuses
+        switch (pieceType)
+        {
+            case ChessPieceType.Pawn:
+                // Pawns advance towards enemy side
+                score += (team == 1) ? y * 0.5f : (7 - y) * 0.5f;
+                break;
+            
+            case ChessPieceType.Knight:
+                // Knights prefer central positions
+                if (x >= 2 && x <= 5 && y >= 2 && y <= 5)
+                    score += 1f;
+                break;
+            
+            case ChessPieceType.Bishop:
+                // Bishops prefer long diagonals
+                if (x == y || x + y == 7)
+                    score += 0.5f;
+                break;
+            
+            case ChessPieceType.King:
+                // King safety - prefer back rank early game, but can be more active in endgame
+                int pieceCount = CountTotalPieces();
+                if (pieceCount > 20) // Early/mid game
+                {
+                    int backRank = (team == 1) ? 7 : 0;
+                    score += (backRank == y) ? 1f : -2f;
+                }
+                break;
+        }
+
+        return score;
+    }
+
+    private float EvaluateDanger(ChessPiece piece, Vector2Int targetPosition)
+    {
+        float danger = 0f;
+
+        // Check if the target position is attacked by enemy pieces
+        for (int x = 0; x < TILE_COUNT_X; x++)
+        {
+            for (int y = 0; y < TILE_COUNT_Y; y++)
+            {
+                ChessPiece enemyPiece = chessPieces[x, y];
+                if (enemyPiece != null && enemyPiece.team != piece.team)
+                {
+                    List<Vector2Int> enemyMoves = enemyPiece.GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
+                    if (ContainsValidMove(ref enemyMoves, targetPosition))
+                    {
+                        danger += GetPieceValue(piece.type) * 0.8f; // Penalize based on piece value
+                    }
+                }
+            }
+        }
+
+        return danger;
+    }
+
+    private float EvaluateKingSafety(AIMove move)
+    {
+        float safety = 0f;
+        ChessPiece king = FindKing(move.piece.team);
+        
+        if (king != null)
+        {
+            // Bonus for moves that protect the king or create escape squares
+            float distanceToKing = Vector2Int.Distance(move.targetPosition, new Vector2Int(king.currentX, king.currentY));
+            if (distanceToKing <= 2f)
+            {
+                safety += 0.5f; // Small bonus for staying near king
+            }
+        }
+
+        return safety;
+    }
+
+    private float EvaluateDevelopment(AIMove move)
+    {
+        float development = 0f;
+
+        // Bonus for moving pieces from starting positions
+        Vector2Int startPos = new Vector2Int(move.piece.currentX, move.piece.currentY);
+        
+        if (move.piece.team == 1) // Black pieces
+        {
+            if ((move.piece.type == ChessPieceType.Knight && (startPos.y == 7)) ||
+                (move.piece.type == ChessPieceType.Bishop && (startPos.y == 7)) ||
+                (move.piece.type == ChessPieceType.Pawn && startPos.y == 6))
+            {
+                development += 1f;
+            }
+        }
+
+        return development;
+    }
+
+    private ChessPiece FindKing(int team)
+    {
+        for (int x = 0; x < TILE_COUNT_X; x++)
+        {
+            for (int y = 0; y < TILE_COUNT_Y; y++)
+            {
+                ChessPiece piece = chessPieces[x, y];
+                if (piece != null && piece.team == team && piece.type == ChessPieceType.King)
+                {
+                    return piece;
+                }
+            }
+        }
+        return null;
+    }
+
+    private int CountTotalPieces()
+    {
+        int count = 0;
+        for (int x = 0; x < TILE_COUNT_X; x++)
+        {
+            for (int y = 0; y < TILE_COUNT_Y; y++)
+            {
+                if (chessPieces[x, y] != null)
+                    count++;
+            }
+        }
+        return count;
+    }
+
+    // Helper class to represent an AI move
+    private class AIMove
+    {
+        public ChessPiece piece;
+        public Vector2Int targetPosition;
+
+        public AIMove(ChessPiece piece, Vector2Int targetPosition)
+        {
+            this.piece = piece;
+            this.targetPosition = targetPosition;
         }
     }
 

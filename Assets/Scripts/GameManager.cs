@@ -25,4 +25,11 @@ public class GameManager : MonoBehaviour
         isSinglePlayerMode = true;
         SceneManager.LoadScene("Game");
     }
+
+    // Call this from "PLAY GAME" button for multiplayer
+    public void StartMultiplayerGame()
+    {
+        isSinglePlayerMode = false;
+        SceneManager.LoadScene("Game");
+    }
 }
