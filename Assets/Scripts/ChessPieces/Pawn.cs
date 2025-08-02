@@ -3,85 +3,90 @@ using UnityEngine;
 
 public class Pawn : ChessPiece
 {
-    public override List<Vector2Int> GetAvailableMoves(ref ChessPiece[,] board, int tileCountX, int tileCountY)
+    public override List<Vector2Int> GetAvailableMoves(
+        ref ChessPiece[,] board,
+        int tileCountX,
+        int tileCountY)
     {
-        List<Vector2Int> r = new List<Vector2Int>();
+        var moves = new List<Vector2Int>();
+        int dir = (team == 0 ? +1 : -1);
+        int nextY = currentY + dir;
 
-        int direction = team == 0 ? 1 : -1; // Assuming team 0 moves up and team 1 moves down
+        // --- 1. one square forward ---
+        if (nextY >= 0 && nextY < tileCountY
+            && board[currentX, nextY] == null)
+        {
+            moves.Add(new Vector2Int(currentX, nextY));
 
-        // One in front
-        if (board[currentX, currentY + direction] == null)
-        {
-            r.Add(new Vector2Int(currentX, currentY + direction));
+            // --- 2. two squares forward from start rank ---
+            int startRank = (team == 0 ? 1 : tileCountY - 2);
+            int twoY = currentY + dir * 2;
+            if (currentY == startRank
+                && twoY >= 0 && twoY < tileCountY
+                && board[currentX, twoY] == null)
+            {
+                moves.Add(new Vector2Int(currentX, twoY));
+            }
         }
 
-        // Two in front 
-        if (board[currentX, currentY + direction] == null)
+        // --- 3. captures to the left/right ---
+        // left
+        if (currentX - 1 >= 0
+            && nextY >= 0 && nextY < tileCountY)
         {
-            if ((team == 0 && currentY == 1) && board[currentX, currentY + (direction * 2)] == null)
-            {
-                r.Add(new Vector2Int(currentX, currentY + (direction * 2)));
-            }
-            if ((team == 1 && currentY == 6) && board[currentX, currentY + (direction * 2)] == null)
-            {
-                r.Add(new Vector2Int(currentX, currentY + (direction * 2)));
-            }
+            var target = board[currentX - 1, nextY];
+            if (target != null && target.team != team)
+                moves.Add(new Vector2Int(currentX - 1, nextY));
         }
-        // Kill move
-        if (currentX  != tileCountX - 1)
+        // right
+        if (currentX + 1 < tileCountX
+            && nextY >= 0 && nextY < tileCountY)
         {
-            if (board[currentX + 1, currentY + direction] != null && board[currentX + 1, currentY + direction].team != team)
-            {
-                r.Add(new Vector2Int(currentX + 1, currentY + direction)); 
-            }
+            var target = board[currentX + 1, nextY];
+            if (target != null && target.team != team)
+                moves.Add(new Vector2Int(currentX + 1, nextY));
         }
-        if (currentX != 0)
-        {
-            if (board[currentX - 1, currentY + direction] != null && board[currentX - 1, currentY + direction].team != team)
-            {
-                r.Add(new Vector2Int(currentX - 1, currentY + direction));
-            }
-        }
-        return r;
+
+        return moves;
     }
 
-    public override SpecialMove GetSpecialMoves(ref ChessPiece[,] board, ref List<Vector2Int[]> moveList, ref List<Vector2Int> availableMoves)
+    public override SpecialMove GetSpecialMoves(
+        ref ChessPiece[,] board,
+        ref List<Vector2Int[]> moveList,
+        ref List<Vector2Int> availableMoves)
     {
-        int direction = 0;
-        if (team == 0)
+        int dir = (team == 0 ? +1 : -1);
+        int finalY = (team == 0 ? board.GetLength(1) - 1 : 0);
+
+        // --- 1) Promotion if any forward move lands on the back rank ---
+        foreach (var m in availableMoves)
         {
-            direction = 1;
+            if (m.y == finalY)
+                return SpecialMove.Promotion;
         }
-        else if (team == 1)
-        {
-            direction = -1;
-        }
-        if ((team == 0 && currentY == 6) || (team == 1 && currentY == 1))
-            return SpecialMove.Promotion;
-        //EnPassant
+
+        // --- 2) En passant ---
         if (moveList.Count > 0)
         {
-            Vector2Int[] lastMove = moveList[moveList.Count - 1];
-            if (board[lastMove[1].x, lastMove[1].y].type == ChessPieceType.Pawn) //Check if the last moved piece was a pawn or not
+            var last = moveList[moveList.Count - 1];
+            var start = last[0];
+            var end = last[1];
+
+            // Was it an enemy pawn moving two squares?
+            if (board[end.x, end.y]?.type == ChessPieceType.Pawn
+                && board[end.x, end.y].team != team
+                && Mathf.Abs(start.y - end.y) == 2
+                && end.y == currentY
+                && Mathf.Abs(end.x - currentX) == 1)
             {
-                if (Mathf.Abs(lastMove[0].y - lastMove[1].y) == 2) //If the Pawn moved +2 in either direction
+                var epTarget = new Vector2Int(end.x, currentY + dir);
+                // make sure that landing square is empty
+                if (epTarget.y >= 0
+                    && epTarget.y < board.GetLength(1)
+                    && board[epTarget.x, epTarget.y] == null)
                 {
-                    if (board[lastMove[1].x, lastMove[1].y].team != team) //If the move was from the other team 
-                    {
-                        if (lastMove[1].y == currentY) //If both pawns are on the same line to execute an EnPassant
-                        {
-                            if (lastMove[1].x == currentX - 1) //Moved left
-                            {
-                                availableMoves.Add(new Vector2Int(currentX - 1, currentY + direction));
-                                return SpecialMove.enPassant;
-                            }
-                            if (lastMove[1].x == currentX + 1) //Moved right
-                            {
-                                availableMoves.Add(new Vector2Int(currentX + 1, currentY + direction));
-                                return SpecialMove.enPassant;
-                            }
-                        }
-                    }
+                    availableMoves.Add(epTarget);
+                    return SpecialMove.enPassant;
                 }
             }
         }

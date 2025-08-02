@@ -339,7 +339,7 @@ public class Chessboard : MonoBehaviour
 
     //Features
     private void BeforeSpecialMove() //This function contains the methods of implementing special moves to the board, each special 
-                                     //move has been implemented in said piece, check those scripts in "ChessPiece" folder!
+                                    //move has been implemented in said piece, check those scripts in "ChessPiece" folder!
     {
         if (specialMoves == SpecialMove.enPassant)
         {
@@ -372,14 +372,14 @@ public class Chessboard : MonoBehaviour
                             + (Vector3.forward * deadSpacing * 1.2f) * deadBlacks.Count, true);
                     }
                     chessPieces[enemyPawn.currentX, enemyPawn.currentY] = null;
-                } 
+                }
             }
         }
 
         if (specialMoves == SpecialMove.Promotion)
         {
             Vector2Int[] lastMove = moveList[moveList.Count - 1];
-            ChessPiece promotedPawn = chessPieces[lastMove[1].x, lastMove[1].y]; 
+            ChessPiece promotedPawn = chessPieces[lastMove[1].x, lastMove[1].y];
             if (promotedPawn.type == ChessPieceType.Pawn)
             {
                 if (promotedPawn.team == 0 && lastMove[1].y == 7) //Promotion for White
@@ -416,7 +416,7 @@ public class Chessboard : MonoBehaviour
                     ChessPiece rook = chessPieces[0, 7];
                     chessPieces[3, 7] = rook;
                     PositionSinglePiece(3, 7);
-                    chessPieces[0, 7 ] = null;
+                    chessPieces[0, 7] = null;
                 }
 
             }
@@ -443,12 +443,22 @@ public class Chessboard : MonoBehaviour
     {
         ChessPiece targetKing = null;
         for (int i = 0; i < TILE_COUNT_X; i++)
+        {
             for (int j = 0; j < TILE_COUNT_Y; j++)
+            {
                 if (chessPieces[i, j] != null)
+                {
                     if (chessPieces[i, j].type == ChessPieceType.King)
+                    {
                         if (chessPieces[i, j].team == currentlyDragging.team)
+                        {
                             targetKing = chessPieces[i, j];
-        
+                        }
+                    }
+                }
+            }    
+        }
+ 
         //We will be deleting moves that are putting us in check since we are sending reference of availableMoves
         SimulateMoveForSinglePiece(currentlyDragging, ref availableMoves, targetKing);
     }
@@ -678,7 +688,7 @@ public class Chessboard : MonoBehaviour
 
         if (!isItWhiteTurn && GameManager.Instance.isSinglePlayerMode)
         {
-            MakeRandomAIMove(); //This is critical, it determines if it's the BOT's turn or not.
+            MakeRandomAIMove(); //This is critical, it determines if it's the BOT's turn or not.  
         }
             
 
