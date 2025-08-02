@@ -46,6 +46,10 @@ public class Chessboard : MonoBehaviour
     private List<Vector2Int[]> moveList = new List<Vector2Int[]>();
     public GameTimer timerManager;
     public ScoreManager scoreManager;
+    
+    // Checkmate caching for performance
+    private int lastCheckmateResult = -1;
+    private int lastMoveCount = -1;
     private void Awake()
     {
         isItWhiteTurn = true;
@@ -62,6 +66,8 @@ public class Chessboard : MonoBehaviour
             currentCamera = Camera.main;
             if (!currentCamera) return;
         }
+
+        CheckForStalemateProactively();
 
         RaycastHit info;
         Ray ray = currentCamera.ScreenPointToRay(Input.mousePosition);
@@ -91,6 +97,24 @@ public class Chessboard : MonoBehaviour
                     // is it our turn?
                     if ((chessPieces[hitPosition.x, hitPosition.y].team == 0 && isItWhiteTurn) || (chessPieces[hitPosition.x, hitPosition.y].team == 1 && !isItWhiteTurn))
                     {
+                        // Check for stalemate/checkmate before allowing piece interaction
+                        int checkmateResult = CHECKMATE();
+                        if (checkmateResult != 0)
+                        {
+                            switch (checkmateResult)
+                            {
+                                case 1:
+                                    // Checkmate: the opponent wins
+                                    int currentTeam = isItWhiteTurn ? 0 : 1;
+                                    CheckMate(1 - currentTeam);
+                                    break;
+                                case 2:
+                                    CheckMate(2); // Draw/Stalemate
+                                    break;
+                            }
+                            return; // Don't allow piece interaction if game is over
+                        }
+
                         currentlyDragging = chessPieces[hitPosition.x, hitPosition.y];
 
                         // get a list of available moves for this piece, highlight tiles as well
@@ -301,6 +325,10 @@ public class Chessboard : MonoBehaviour
         currentlyDragging = null;
         availableMoves.Clear();
         moveList.Clear();
+        
+        // Reset checkmate cache
+        lastCheckmateResult = -1;
+        lastMoveCount = -1;
 
         // destroy and clear pieces
         for (int x = 0; x < TILE_COUNT_X; x++)
@@ -319,6 +347,9 @@ public class Chessboard : MonoBehaviour
         SpawnAllPieces();
         PositionAllPieces();
         isItWhiteTurn = true;
+        
+        // Check for immediate game end conditions (shouldn't happen at start, but safety check)
+        CheckForGameEndAtTurnStart();
 
         // **reset the timers** back to initial values
         if (timerManager != null)
@@ -535,18 +566,29 @@ public class Chessboard : MonoBehaviour
     }
     private int CHECKMATE()
     {
-        // 1) If only two kings remain on the board, it's an immediate draw
-        int livePieceCount = 0;
-        for (int x = 0; x < TILE_COUNT_X; x++)
-            for (int y = 0; y < TILE_COUNT_Y; y++)
-                if (chessPieces[x, y] != null)
-                    livePieceCount++;
-        if (livePieceCount == 2)
+
+        int result = CalculateCheckmateStatus();
+        
+        // Cache the result
+        lastCheckmateResult = result;
+        lastMoveCount = moveList.Count;
+        
+        return result;
+    }
+
+    private int CalculateCheckmateStatus()
+    {
+        // 1) Check for insufficient material draws
+        if (IsInsufficientMaterial())
+        {
+            Debug.Log("Game ending: Insufficient material draw");
             return 2; // 2 = draw
+        }
 
         // 2) Determine whose turn it is
         int teamToMove = isItWhiteTurn ? 0 : 1;
         int opponentTeam = 1 - teamToMove;
+        string currentTeamName = teamToMove == 0 ? "White" : "Black";
 
         // 3) Find the king of the side to move
         ChessPiece king = null;
@@ -563,43 +605,173 @@ public class Chessboard : MonoBehaviour
             return 0; // should never happen
 
         // 4) Is the king currently in check?
-        Vector2Int kingPos = new Vector2Int(king.currentX, king.currentY);
-        bool inCheck = false;
-        var opponentAttacks = new List<Vector2Int>();
+        bool inCheck = IsKingInCheck(king, opponentTeam);
+
+        // 5) Does the side to move have any legal (non-leaving-in-check) moves?
+        bool hasLegalMove = HasAnyLegalMoves(teamToMove, king);
+
+        Debug.Log($"Checkmate analysis for {currentTeamName}: inCheck={inCheck}, hasLegalMove={hasLegalMove}");
+
+        // 6) Decide outcome
+        if (inCheck && !hasLegalMove)
+        {
+            Debug.Log($"CHECKMATE! {currentTeamName} is checkmated");
+            return 1; // 1 = checkmate
+        }
+        if (!inCheck && !hasLegalMove)
+        {
+            Debug.Log($"STALEMATE! {currentTeamName} has no legal moves but is not in check");
+            return 2; // 2 = stalemate/draw
+        }
+
+        return 0; // game continues
+    }
+
+    private bool IsInsufficientMaterial()
+    {
+        var whitePieces = new List<ChessPiece>();
+        var blackPieces = new List<ChessPiece>();
+        
+        // Count all pieces for both teams
         for (int x = 0; x < TILE_COUNT_X; x++)
+        {
+            for (int y = 0; y < TILE_COUNT_Y; y++)
+            {
+                if (chessPieces[x, y] != null)
+                {
+                    if (chessPieces[x, y].team == 0)
+                        whitePieces.Add(chessPieces[x, y]);
+                    else
+                        blackPieces.Add(chessPieces[x, y]);
+                }
+            }
+        }
+
+        // King vs King
+        if (whitePieces.Count == 1 && blackPieces.Count == 1)
+            return true;
+
+        // King vs King + Bishop or Knight
+        if ((whitePieces.Count == 1 && blackPieces.Count == 2) || 
+            (whitePieces.Count == 2 && blackPieces.Count == 1))
+        {
+            var lonePieces = whitePieces.Count == 2 ? whitePieces : blackPieces;
+            foreach (var piece in lonePieces)
+            {
+                if (piece.type == ChessPieceType.Bishop || piece.type == ChessPieceType.Knight)
+                    return true;
+            }
+        }
+
+        // King + Bishop vs King + Bishop (same color squares)
+        if (whitePieces.Count == 2 && blackPieces.Count == 2)
+        {
+            var whiteBishop = whitePieces.Find(p => p.type == ChessPieceType.Bishop);
+            var blackBishop = blackPieces.Find(p => p.type == ChessPieceType.Bishop);
+            
+            if (whiteBishop != null && blackBishop != null)
+            {
+                // Check if bishops are on same color squares
+                bool whiteOnLightSquare = (whiteBishop.currentX + whiteBishop.currentY) % 2 == 0;
+                bool blackOnLightSquare = (blackBishop.currentX + blackBishop.currentY) % 2 == 0;
+                if (whiteOnLightSquare == blackOnLightSquare)
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsKingInCheck(ChessPiece king, int opponentTeam)
+    {
+        Vector2Int kingPos = new Vector2Int(king.currentX, king.currentY);
+        var opponentAttacks = new List<Vector2Int>();
+        
+        for (int x = 0; x < TILE_COUNT_X; x++)
+        {
             for (int y = 0; y < TILE_COUNT_Y; y++)
             {
                 var p = chessPieces[x, y];
                 if (p != null && p.team == opponentTeam)
+                {
                     opponentAttacks.AddRange(p.GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y));
+                }
             }
-        if (ContainsValidMove(ref opponentAttacks, kingPos))
-            inCheck = true;
+        }
+        
+        return ContainsValidMove(ref opponentAttacks, kingPos);
+    }
 
-        // 5) Does the side to move have any legal (non-leaving-in-check) moves?
-        bool hasLegalMove = false;
-        for (int x = 0; x < TILE_COUNT_X && !hasLegalMove; x++)
+    private bool HasAnyLegalMoves(int teamToMove, ChessPiece king)
+    {
+        string teamName = teamToMove == 0 ? "White" : "Black";
+        Debug.Log($"Checking legal moves for {teamName}...");
+        
+        for (int x = 0; x < TILE_COUNT_X; x++)
         {
-            for (int y = 0; y < TILE_COUNT_Y && !hasLegalMove; y++)
+            for (int y = 0; y < TILE_COUNT_Y; y++)
             {
                 var p = chessPieces[x, y];
                 if (p != null && p.team == teamToMove)
                 {
                     var moves = p.GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
+                    Debug.Log($"  {p.type} at ({x},{y}) has {moves.Count} raw moves");
+                    
                     SimulateMoveForSinglePiece(p, ref moves, king);
+                    Debug.Log($"  After simulation: {moves.Count} legal moves");
+                    
                     if (moves.Count > 0)
-                        hasLegalMove = true;
+                    {
+                        Debug.Log($"  Found legal moves! {teamName} has legal moves.");
+                        return true;
+                    }
                 }
             }
         }
+        Debug.Log($"  No legal moves found for {teamName}");
+        return false;
+    }
 
-        // 6) Decide outcome
-        if (inCheck && !hasLegalMove)
-            return 1; // 1 = checkmate
-        if (!inCheck && !hasLegalMove)
-            return 2; // 2 = stalemate/draw
+    private void CheckForGameEndAtTurnStart()
+    {
+        int checkmateResult = CHECKMATE();
+        switch (checkmateResult)
+        {
+            case 1:
+                // Checkmate: the previous player wins (since we just switched turns)
+                int previousPlayer = isItWhiteTurn ? 1 : 0;
+                CheckMate(previousPlayer);
+                break;
+            case 2:
+                CheckMate(2); // Draw/Stalemate
+                break;
+            default:
+                // Game continues
+                break;
+        }
+    }
 
-        return 0; // game continues
+    private void CheckForStalemateProactively()
+    {
+        // Only check if game is still active (no victory screen showing)
+        if (winningScreen.activeInHierarchy)
+            return;
+
+        int checkmateResult = CHECKMATE();
+        if (checkmateResult != 0)
+        {
+            switch (checkmateResult)
+            {
+                case 1:
+                    // Checkmate: the opponent of current player wins
+                    int currentTeam = isItWhiteTurn ? 0 : 1;
+                    CheckMate(1 - currentTeam);
+                    break;
+                case 2:
+                    CheckMate(2); // Draw/Stalemate
+                    break;
+            }
+        }
     }
 
     // Operations
@@ -694,6 +866,9 @@ public class Chessboard : MonoBehaviour
             timerManager.SwitchTimer();
         }
 
+        // Check for stalemate/checkmate at the start of the new turn
+        CheckForGameEndAtTurnStart();
+
         if (!isItWhiteTurn && GameManager.Instance.isSinglePlayerMode)
         {
             MakeRandomAIMove(); //This is critical, it determines if it's the BOT's turn or not.  
@@ -703,19 +878,22 @@ public class Chessboard : MonoBehaviour
 
         moveList.Add(new Vector2Int[] { previousPosition, new Vector2Int(x, y) });
 
+        // Invalidate checkmate cache since board state changed
+        lastCheckmateResult = -1;
+
         BeforeSpecialMove();
 
-        CHECKMATE();
-
-        switch (CHECKMATE())
+        int checkmateResult = CHECKMATE();
+        switch (checkmateResult)
         {
-            default:
-                break;
             case 1:
-                CheckMate(cp.team);
+                // Checkmate: the opponent of the current player wins
+                CheckMate(1 - cp.team);
                 break;
             case 2:
-                CheckMate(2);
+                CheckMate(2); // Draw/Stalemate
+                break;
+            default:
                 break;
         }
 
@@ -740,8 +918,22 @@ public class Chessboard : MonoBehaviour
 
         if (allPossibleMoves.Count == 0)
         {
-            // No valid moves - switch turn
-            isItWhiteTurn = true;
+            // No valid moves - check for stalemate/checkmate
+            int checkmateResult = CHECKMATE();
+            switch (checkmateResult)
+            {
+                case 1:
+                    // Checkmate: the current player (white) wins since AI (black) has no moves
+                    CheckMate(0); // White wins
+                    break;
+                case 2:
+                    CheckMate(2); // Draw/Stalemate
+                    break;
+                default:
+                    // This shouldn't happen, but fallback to switching turn
+                    isItWhiteTurn = true;
+                    break;
+            }
             return;
         }
 
