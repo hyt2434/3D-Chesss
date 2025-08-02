@@ -173,6 +173,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c5dc650a960a80f468d794d32009c26f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  pauseCanvas: {fileID: 37173572}
 --- !u!1 &164470031
 GameObject:
   m_ObjectHideFlags: 0

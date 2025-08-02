@@ -5,6 +5,7 @@ public class GameManager : MonoBehaviour
 {
     public static GameManager Instance;
     public bool isSinglePlayerMode = false;
+    public bool canResume = false;
 
     void Awake()
     {
@@ -13,23 +14,20 @@ public class GameManager : MonoBehaviour
             Instance = this;
             DontDestroyOnLoad(gameObject);
         }
-        else
-        {
-            Destroy(gameObject);
-        }
+        else Destroy(gameObject);
     }
 
-    // Call this from "PLAY WITH BOT" button
     public void StartBotGame()
     {
         isSinglePlayerMode = true;
+        canResume = false;
         SceneManager.LoadScene("Game");
     }
 
-    // Call this from "PLAY GAME" button for multiplayer
     public void StartMultiplayerGame()
     {
         isSinglePlayerMode = false;
+        canResume = false;
         SceneManager.LoadScene("Game");
     }
 }

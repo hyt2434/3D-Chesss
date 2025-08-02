@@ -20,6 +20,12 @@ public class GameTimer : MonoBehaviour
 
     void Start()
     {
+        //if we're in "play with bot", shut the timer right off
+        if (GameManager.Instance != null && GameManager.Instance.isSinglePlayerMode)
+        {
+            gameObject.SetActive(false);
+            return;
+        }
         // 1) Hide winning screen up front
         if (winningScreen != null)
             winningScreen.SetActive(false);

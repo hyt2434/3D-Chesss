@@ -1,46 +1,56 @@
+﻿// PauseMenuController.cs
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
 public class PauseMenuController : MonoBehaviour
 {
     /// <summary>
-    /// Called by your on-screen PauseButton in Game scene.
+    /// Called by the Pause button in the Game scene.
+    /// It pauses the game and loads the PauseMenu scene additively.
     /// </summary>
-    public void ShowPauseMenu()
+    public void OnPauseButton()
     {
-        // freeze game
+        // Mark that we can resume later from MainMenu
+        GameManager.Instance.canResume = true;
+
+        // Freeze the game
         Time.timeScale = 0f;
-        // load the PauseMenu scene additively
+
+        // Load the PauseMenu scene on top of the Game scene
         SceneManager.LoadScene("PauseMenu", LoadSceneMode.Additive);
     }
 
     /// <summary>
-    /// Called by Resume button in PauseMenu.
+    /// Called by the Resume button in the PauseMenu scene.
+    /// It unloads the PauseMenu scene and unpauses the game.
     /// </summary>
     public void OnResume()
     {
-        // unfreeze
-        Time.timeScale = 1f;
-        // unload the PauseMenu scene
+        // Unload the PauseMenu scene
         SceneManager.UnloadSceneAsync("PauseMenu");
+
+        // Unfreeze the game
+        Time.timeScale = 1f;
     }
 
     /// <summary>
-    /// Called by Home button in PauseMenu.
+    /// Called by the Home button in the PauseMenu scene.
+    /// It keeps the Game scene paused in the background,
+    /// loads the MainMenu scene additively, and unloads PauseMenu.
     /// </summary>
     public void OnHome()
     {
-        // restore time scaling
-        Time.timeScale = 1f;
-        // unload PauseMenu
-        SceneManager.UnloadSceneAsync("PauseMenu");
-        // go back to MainMenu
-        SceneManager.LoadScene("MainMenu");
-    }
+        // Keep the resume flag so MainMenu shows the Resume button
+        GameManager.Instance.canResume = true;
 
-    /// <summary>
-    /// Called by Quit button in PauseMenu.
-    /// </summary>
+        // Load the MainMenu scene additively
+        SceneManager.LoadScene("MainMenu", LoadSceneMode.Additive);
+
+        // Unload the PauseMenu scene
+        SceneManager.UnloadSceneAsync("PauseMenu");
+    }
+   // Called by the Quit button in the PauseMenu scene.
+   // It quits the application.
     public void OnQuit()
     {
         Application.Quit();

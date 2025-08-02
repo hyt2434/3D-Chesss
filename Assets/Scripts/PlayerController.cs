@@ -83,7 +83,9 @@ public class PlayerMenuController : MonoBehaviour
     }
 
     public void OnPlay()
+
     {
+        Debug.Log("OnPlay() called!");
         string name = nameInput.text.Trim();
         if (!int.TryParse(ageInput.text, out int age) || string.IsNullOrEmpty(name))
         {
