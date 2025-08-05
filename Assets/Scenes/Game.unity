@@ -340,7 +340,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Material: {fileID: 0}
-  m_Color: {r: 0.23773581, g: 0.12852591, b: 0.07132072, a: 0.6117647}
+  m_Color: {r: 0.23773581, g: 0.12852591, b: 0.07132072, a: 0.8}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -1347,6 +1347,7 @@ MonoBehaviour:
   whiteTimerText: {fileID: 1691919483}
   blackTimerText: {fileID: 410690048}
   winningScreen: {fileID: 295795830}
+  gameResultHandlerRef: {fileID: 2143932989}
 --- !u!1 &963194225
 GameObject:
   m_ObjectHideFlags: 0
@@ -1964,6 +1965,50 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   whiteScoreText: {fileID: 1158238903}
   blackScoreText: {fileID: 599873568}
+--- !u!1 &1543563520
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1543563522}
+  - component: {fileID: 1543563523}
+  m_Layer: 0
+  m_Name: PlayerRanking
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1543563522
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1543563520}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 822.3108, y: 542.73627, z: -1.3810577}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1543563523
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1543563520}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4e88c2e37bcd1ce4bb8e34938216fd6f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &1593740548
 GameObject:
   m_ObjectHideFlags: 0
@@ -2601,7 +2646,8 @@ MonoBehaviour:
   deadSpacing: 0.35
   dragOffset: 1
   winningScreen: {fileID: 295795830}
-  gameManager: {fileID: 0}
+  gameManager: {fileID: 1287077883}
+  gameResultHandlerRef: {fileID: 2143932989}
   prefabs:
   - {fileID: 8551828756444820956, guid: 508dba21f9599b34e98b8ed3586c4a7c, type: 3}
   - {fileID: 8722938610359770989, guid: 6129bd43d9852974d82b0e1d0eb483b1, type: 3}
@@ -3013,6 +3059,56 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2074936527}
   m_CullTransparentMesh: 1
+--- !u!1 &2143932988
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2143932990}
+  - component: {fileID: 2143932989}
+  m_Layer: 0
+  m_Name: GameResultHander
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &2143932989
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2143932988}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4ddded9140eb5b4c89b5aaca1b33de3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  whitePlayerName: White
+  blackPlayerName: Black
+  winScore: 100
+  loseScore: 10
+  checkmateBonus: 50
+  captureBonus: 5
+--- !u!4 &2143932990
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2143932988}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 822.3108, y: 542.73627, z: -1.3810577}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -3025,3 +3121,5 @@ SceneRoots:
   - {fileID: 1714271842}
   - {fileID: 1258023354}
   - {fileID: 1287077884}
+  - {fileID: 2143932990}
+  - {fileID: 1543563522}

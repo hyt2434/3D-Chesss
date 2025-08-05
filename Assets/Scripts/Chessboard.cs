@@ -24,6 +24,7 @@ public class Chessboard : MonoBehaviour
     [SerializeField] private float dragOffset = 1.5f;
     [SerializeField] private GameObject winningScreen;
     [SerializeField] private GameManager gameManager;
+    [SerializeField] private MonoBehaviour gameResultHandlerRef;
 
 
     [Header("Prefabs & Materials")]
@@ -310,16 +311,80 @@ public class Chessboard : MonoBehaviour
 
     private void DisplayVictory(int victoryTeam)
     {
+        if (winningScreen == null)
+            return;
+
+        // 1) Activate the whole results panel
         winningScreen.SetActive(true);
-        winningScreen.transform.GetChild(victoryTeam).gameObject.SetActive(true);
+
+        // 2) Hide all child labels (White wins, Black wins, Draw, etc.)
+        for (int i = 0; i < winningScreen.transform.childCount; i++)
+        {
+            winningScreen.transform.GetChild(i).gameObject.SetActive(false);
+        }
+
+        // 3) Show only the correct outcome label:
+        //    child 0 = "White Wins", child 1 = "Black Wins", child 2 = "Draw"
+        if (victoryTeam == 0)
+        {
+            // White wins
+            winningScreen.transform.GetChild(0).gameObject.SetActive(true);
+        }
+        else if (victoryTeam == 1)
+        {
+            // Black wins
+            winningScreen.transform.GetChild(1).gameObject.SetActive(true);
+        }
+        else if (victoryTeam == 2)
+        {
+            // Draw / Stalemate
+            if (winningScreen.transform.childCount > 2)
+                winningScreen.transform.GetChild(2).gameObject.SetActive(true);
+        }
+
+        // 4) Update player rankings if we have a GameResultHandler reference
+        if (gameResultHandlerRef != null && gameResultHandlerRef.GetType().Name == "GameResultHandler")
+        {
+            var handlerType = gameResultHandlerRef.GetType();
+            if (victoryTeam == 2)
+            {
+                // Draw
+                var onDraw = handlerType.GetMethod("OnGameDraw");
+                if (onDraw != null)
+                    onDraw.Invoke(gameResultHandlerRef, null);
+            }
+            else
+            {
+                // Win: args = (winningTeamIndex, victoryIsByCheckmate, isDraw)
+                var onEnd = handlerType.GetMethod("OnGameEnd");
+                if (onEnd != null)
+                    onEnd.Invoke(gameResultHandlerRef, new object[] { victoryTeam, true, false });
+            }
+        }
     }
     public void OnRestartButton()
     {
         // hide victory UI
-        winningScreen.transform.GetChild(2).gameObject.SetActive(false);
-        winningScreen.transform.GetChild(0).gameObject.SetActive(false);
-        winningScreen.transform.GetChild(1).gameObject.SetActive(false);
-        winningScreen.SetActive(false);
+        if (winningScreen != null)
+        {
+            if (winningScreen.transform.childCount > 2)
+                winningScreen.transform.GetChild(2).gameObject.SetActive(false);
+            if (winningScreen.transform.childCount > 0)
+                winningScreen.transform.GetChild(0).gameObject.SetActive(false);
+            if (winningScreen.transform.childCount > 1)
+                winningScreen.transform.GetChild(1).gameObject.SetActive(false);
+            winningScreen.SetActive(false);
+        }
+
+        // Reset game result handler
+        if (gameResultHandlerRef != null && gameResultHandlerRef.GetType().Name == "GameResultHandler")
+        {
+            var resetMethod = gameResultHandlerRef.GetType().GetMethod("ResetGameEnded");
+            if (resetMethod != null)
+            {
+                resetMethod.Invoke(gameResultHandlerRef, null);
+            }
+        }
 
         // reset drag & move lists
         currentlyDragging = null;

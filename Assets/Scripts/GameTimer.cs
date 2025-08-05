@@ -11,6 +11,10 @@ public class GameTimer : MonoBehaviour
     [Tooltip("Drag in the GameObject that has your two victory children")]
     public GameObject winningScreen;
 
+    [Header("Game Result Handler")]
+    [Tooltip("Reference to the game result handler")]
+    public MonoBehaviour gameResultHandlerRef;
+
     bool useTimer;
     bool running;
     bool isWhiteTurn = true;
@@ -20,12 +24,13 @@ public class GameTimer : MonoBehaviour
 
     void Start()
     {
-        //if we're in "play with bot", shut the timer right off
+        // if we're in "play with bot", shut the timer right off
         if (GameManager.Instance != null && GameManager.Instance.isSinglePlayerMode)
         {
             gameObject.SetActive(false);
             return;
         }
+
         // 1) Hide winning screen up front
         if (winningScreen != null)
             winningScreen.SetActive(false);
@@ -42,14 +47,21 @@ public class GameTimer : MonoBehaviour
         initialTotal = PlayerPrefs.GetInt("GameTimerSeconds", 300);
         initialBonus = PlayerPrefs.GetInt("BonusSeconds", 0);
         bonusTime = initialBonus;
-        // initialize
         whiteTime = blackTime = initialTotal;
         running = true;
     }
 
     void Update()
     {
-        if (!running) return;
+        // --- NEW: if the winningScreen has been activated by anyone, stop the timer immediately ---
+        if (winningScreen != null && winningScreen.activeInHierarchy)
+        {
+            running = false;
+            return;
+        }
+
+        if (!running)
+            return;
 
         float dt = Time.deltaTime;
         if (isWhiteTurn) whiteTime = Mathf.Max(0f, whiteTime - dt);
@@ -67,10 +79,23 @@ public class GameTimer : MonoBehaviour
             // 5) Show the winning screen
             if (winningScreen != null)
             {
+                // deactivate all children
+                for (int i = 0; i < winningScreen.transform.childCount; i++)
+                    winningScreen.transform.GetChild(i).gameObject.SetActive(false);
+
+                // activate the panel + correct child
                 winningScreen.SetActive(true);
                 int winnerIndex = whiteWins ? 0 : 1;
-                // Assumes child[0] = White-win UI, child[1] = Black-win UI
-                winningScreen.transform.GetChild(winnerIndex).gameObject.SetActive(true);
+                if (winnerIndex < winningScreen.transform.childCount)
+                    winningScreen.transform.GetChild(winnerIndex).gameObject.SetActive(true);
+            }
+
+            // 6) Update player rankings
+            if (gameResultHandlerRef != null && gameResultHandlerRef.GetType().Name == "GameResultHandler")
+            {
+                var onGameEnd = gameResultHandlerRef.GetType().GetMethod("OnGameEnd");
+                if (onGameEnd != null)
+                    onGameEnd.Invoke(gameResultHandlerRef, new object[] { whiteWins ? 0 : 1, false, true });
             }
 
             Debug.Log(whiteWins
@@ -92,17 +117,15 @@ public class GameTimer : MonoBehaviour
         int sec = Mathf.CeilToInt(t);
         return $"{sec / 60:00}:{sec % 60:00}";
     }
+
     public void ResetTimers()
     {
         if (!useTimer) return;
-        whiteTime = initialTotal;
-        blackTime = initialTotal;
+        whiteTime = blackTime = initialTotal;
         bonusTime = initialBonus;
         isWhiteTurn = true;
         running = true;
-        // update your UI immediately
         whiteTimerText.text = Format(whiteTime);
         blackTimerText.text = Format(blackTime);
     }
-
 }

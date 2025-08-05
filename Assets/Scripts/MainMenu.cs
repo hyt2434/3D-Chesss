@@ -22,9 +22,23 @@ public class MainMenuController : MonoBehaviour
     [Tooltip("Your confirmation‐dialog controller")]
     public ConfirmDialogController confirmDialog;
 
+    [Header("Ranking Display")]
+    [Tooltip("The ranking display component")]
+    public MonoBehaviour rankingDisplayRef;
+
     void Start()
     {
-        // 1) Should we show “Resume”? (only if we came via Pause→Home)
+        // Initialize ranking display
+        if (rankingDisplayRef != null && rankingDisplayRef.GetType().Name == "RankingDisplay")
+        {
+            var updateMethod = rankingDisplayRef.GetType().GetMethod("UpdateRankingDisplay");
+            if (updateMethod != null)
+            {
+                updateMethod.Invoke(rankingDisplayRef, null);
+            }
+        }
+
+        // 1) Should we show "Resume"? (only if we came via Pause→Home)
         bool canResume = GameManager.Instance.canResume;
         resumeButton.gameObject.SetActive(canResume);
 
