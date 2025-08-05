@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using Unity.VisualScripting;
 using UnityEngine;
@@ -53,11 +54,23 @@ public class Chessboard : MonoBehaviour
     private int lastMoveCount = -1;
     private void Awake()
     {
+        // only cache your “turn” variable here, don’t generate tiles yet
         isItWhiteTurn = true;
+    }
 
+    private IEnumerator Start()
+    {
+        // 1) Build board
         GenerateAllTiles(tileSize, TILE_COUNT_X, TILE_COUNT_Y);
         SpawnAllPieces();
         PositionAllPieces();
+
+        // 2) If single‐player AND human is Black, let the AI (White) move first
+        if (GameManager.Instance.isSinglePlayerMode && GameManager.Instance.isPlayerWhite == false)
+        {
+            yield return null;             // wait one frame so everything is fully set up
+            TryActivateBot();               // will call MakeRandomAIMove() if it _is_ White’s turn
+        }
     }
 
     private void Update()
@@ -422,11 +435,11 @@ public class Chessboard : MonoBehaviour
     }
     public void TryActivateBot()
     {
-        if (!isItWhiteTurn && GameManager.Instance.isSinglePlayerMode)
-        {
-            Invoke("MakeRandomAIMove", 0.5f); // 0.5 second delay
-        }
+        if (!GameManager.Instance.isSinglePlayerMode) return;
+        // this will in turn call MakeRandomAIMove()
+        Invoke(nameof(MakeRandomAIMove), 0.5f);
     }
+
     public void OnExitButton()
     {
         // go back to your MainMenu scene
@@ -970,16 +983,29 @@ public class Chessboard : MonoBehaviour
 
     public void MakeRandomAIMove()
     {
-        if (isItWhiteTurn) return;
-        MakeSmartAIMove();
+        // Determine AI’s color: if human is White, AI is Black (team=1), else AI is White (team=0)
+        int aiTeam = GameManager.Instance.isPlayerWhite ? 1 : 0;
+
+        // Only move if it actually is that team’s turn
+        bool whitesTurnNow = isItWhiteTurn;
+        bool aiShouldMove = (aiTeam == 0 && whitesTurnNow) || (aiTeam == 1 && !whitesTurnNow);
+        if (aiShouldMove)
+        {
+            MakeSmartAIMove();
+        }
     }
 
     public void MakeSmartAIMove()
     {
-        if (isItWhiteTurn) return;
-
+        // figure out which side the AI is:
+        int aiTeam = GameManager.Instance.isPlayerWhite ? 1 : 0;
+        
+        // Only move if it's the AI's turn
+        bool whitesTurnNow = isItWhiteTurn;
+        bool aiShouldMove = (aiTeam == 0 && whitesTurnNow) || (aiTeam == 1 && !whitesTurnNow);
+        if (!aiShouldMove) return;
         // Find all possible moves for black pieces
-        List<AIMove> allPossibleMoves = GetAllPossibleMoves(1); // 1 = black team
+        List<AIMove> allPossibleMoves = GetAllPossibleMoves(aiTeam); 
 
         if (allPossibleMoves.Count == 0)
         {
@@ -1008,12 +1034,12 @@ public class Chessboard : MonoBehaviour
         // Execute the best move
         currentlyDragging = bestMove.piece;
         availableMoves = bestMove.piece.GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
-        
-        // Apply check prevention
-        ChessPiece targetKing = FindKing(1);
-        if (targetKing != null)
+
+        // apply check-prevention against the AI’s own king:
+        ChessPiece aitKing = FindKing(aiTeam);
+        if (aitKing != null)
         {
-            SimulateMoveForSinglePiece(bestMove.piece, ref availableMoves, targetKing);
+            SimulateMoveForSinglePiece(bestMove.piece, ref availableMoves, aitKing);
         }
 
         // Verify the move is still valid after check prevention

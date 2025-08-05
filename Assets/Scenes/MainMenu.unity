@@ -2793,6 +2793,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   isSinglePlayerMode: 0
   canResume: 0
+  isPlayerWhite: 1
 --- !u!4 &1071553987
 Transform:
   m_ObjectHideFlags: 0

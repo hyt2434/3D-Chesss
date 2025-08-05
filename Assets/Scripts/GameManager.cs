@@ -6,7 +6,8 @@ public class GameManager : MonoBehaviour
     public static GameManager Instance;
     public bool isSinglePlayerMode = false;
     public bool canResume = false;
-
+    // 0 = White, 1 = Black
+    public bool isPlayerWhite = true;
     void Awake()
     {
         if (Instance == null)
@@ -14,7 +15,10 @@ public class GameManager : MonoBehaviour
             Instance = this;
             DontDestroyOnLoad(gameObject);
         }
-        else Destroy(gameObject);
+        else
+        {
+            Destroy(gameObject);
+        }
     }
 
     public void StartBotGame()
