@@ -17,8 +17,7 @@ public class PlayerMenuController : MonoBehaviour
     public GameObject saveButton; // for New Player
     public GameObject playButton; // for Existing Player
 
-    // track mode: true=new player, false=existing
-    private bool isNewMode;
+
 
     void Start()
     {
@@ -28,11 +27,21 @@ public class PlayerMenuController : MonoBehaviour
 
         saveButton.SetActive(false);
         playButton.SetActive(false);
+        
+        // Show current player info if in multiplayer setup mode
+        string multiplayerSetup = PlayerPrefs.GetString("MultiplayerSetup", "");
+        if (multiplayerSetup == "true")
+        {
+            string firstPlayerName = PlayerPrefs.GetString("CurrentPlayerName", "");
+            if (!string.IsNullOrEmpty(firstPlayerName))
+            {
+                errorText.text = $"Player 1: {firstPlayerName} is already logged in. Please login as Player 2.";
+            }
+        }
     }
 
     public void OnNewPlayer()
     {
-        isNewMode = true;
         selectionPanel.SetActive(false);
         inputPanel.SetActive(true);
         errorText.text = "";
@@ -43,7 +52,6 @@ public class PlayerMenuController : MonoBehaviour
 
     public void OnOldPlayer()
     {
-        isNewMode = false;
         selectionPanel.SetActive(false);
         inputPanel.SetActive(true);
         errorText.text = "";
@@ -77,9 +85,37 @@ public class PlayerMenuController : MonoBehaviour
         PlayerPrefs.SetString($"Player_{count}_Name", name);
         PlayerPrefs.SetInt($"Player_{count}_Age", age);
         PlayerPrefs.SetInt("PlayerCount", count + 1);
-        PlayerPrefs.Save();
-
-        SceneManager.LoadScene("MainMenu");
+        
+        // Check if we're setting up multiplayer first
+        string multiplayerSetup = PlayerPrefs.GetString("MultiplayerSetup", "");
+        if (multiplayerSetup == "true")
+        {
+            // Check if second player is the same as first player
+            string firstPlayerName = PlayerPrefs.GetString("CurrentPlayerName", "");
+            if (name == firstPlayerName)
+            {
+                errorText.text = "You cannot play against yourself! Please use a different player account.";
+                return;
+            }
+            
+            // Store second player name and age, but DON'T override CurrentPlayerName
+            PlayerPrefs.SetString("SecondPlayerName", name);
+            PlayerPrefs.SetInt("SecondPlayerAge", age);
+            PlayerPrefs.SetString("NewPlayerNeedsPoints", name);
+            PlayerPrefs.DeleteKey("MultiplayerSetup");
+            PlayerPrefs.Save();
+            Debug.Log($"Second player {name} (age {age}) added for multiplayer");
+            SceneManager.LoadScene("TimerMenu");
+        }
+        else
+        {
+            // Normal single player mode - store as current player
+            PlayerPrefs.SetString("CurrentPlayerName", name);
+            PlayerPrefs.SetString("NewPlayerNeedsPoints", name);
+            PlayerPrefs.Save();
+            Debug.Log($"New player {name} marked to receive 1000 starting points when ranking system is available");
+            SceneManager.LoadScene("MainMenu");
+        }
     }
 
     public void OnPlay()
@@ -99,8 +135,33 @@ public class PlayerMenuController : MonoBehaviour
             if (PlayerPrefs.GetString($"Player_{i}_Name", "") == name &&
                 PlayerPrefs.GetInt($"Player_{i}_Age", -1) == age)
             {
-                // found existing
-                SceneManager.LoadScene("MainMenu");
+                // Check if we're setting up multiplayer
+                string multiplayerSetup = PlayerPrefs.GetString("MultiplayerSetup", "");
+                if (multiplayerSetup == "true")
+                {
+                    // Check if second player is the same as first player
+                    string firstPlayerName = PlayerPrefs.GetString("CurrentPlayerName", "");
+                    if (name == firstPlayerName)
+                    {
+                        errorText.text = "You cannot play against yourself! Please use a different player account.";
+                        return;
+                    }
+                    
+                    // Store second player name and age, but DON'T override CurrentPlayerName
+                    PlayerPrefs.SetString("SecondPlayerName", name);
+                    PlayerPrefs.SetInt("SecondPlayerAge", age);
+                    PlayerPrefs.DeleteKey("MultiplayerSetup");
+                    PlayerPrefs.Save();
+                    Debug.Log($"Second player {name} (age {age}) logged in for multiplayer");
+                    SceneManager.LoadScene("TimerMenu");
+                }
+                else
+                {
+                    // found existing - store as current player (only for normal login)
+                    PlayerPrefs.SetString("CurrentPlayerName", name);
+                    PlayerPrefs.Save();
+                    SceneManager.LoadScene("MainMenu");
+                }
                 return;
             }
         }

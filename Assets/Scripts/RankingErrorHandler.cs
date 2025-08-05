@@ -13,28 +13,12 @@ public static class RankingErrorHandler
     {
         try
         {
-            var handlers = Object.FindObjectsOfType<MonoBehaviour>();
-            foreach (var handler in handlers)
-            {
-                if (handler != null && handler.GetType().Name == "PlayerRanking")
-                {
-                    var instanceProperty = handler.GetType().GetProperty("Instance");
-                    if (instanceProperty != null)
-                    {
-                        var instance = instanceProperty.GetValue(null);
-                        if (instance != null)
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-            Debug.LogWarning("[Ranking] PlayerRanking instance not found! Make sure PlayerRanking GameObject exists in Game scene.");
-            return false;
+            // Direct check of the singleton instance
+            return PlayerRanking.Instance != null;
         }
         catch (System.Exception e)
         {
-            Debug.LogWarning("[Ranking] PlayerRanking not found or not compiled yet: " + e.Message);
+            Debug.LogWarning("[Ranking] Error checking PlayerRanking instance: " + e.Message);
             return false;
         }
     }

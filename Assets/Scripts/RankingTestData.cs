@@ -8,8 +8,26 @@ public class RankingTestData : MonoBehaviour
 
     void Start()
     {
-        if (addTestData && RankingErrorHandler.IsPlayerRankingAvailable())
+        
+        if (addTestData)
         {
+            // Use coroutine to wait for PlayerRanking to be initialized
+            StartCoroutine(AddTestDataWhenReady());
+        }
+    }
+    
+    private System.Collections.IEnumerator AddTestDataWhenReady()
+    {
+        // Wait up to 5 seconds for PlayerRanking to be initialized
+        float timeout = 5f;
+        while (timeout > 0 && !RankingErrorHandler.IsPlayerRankingAvailable())
+        {
+            yield return new WaitForSeconds(0.1f);
+            timeout -= 0.1f;
+        }
+        
+        if (RankingErrorHandler.IsPlayerRankingAvailable())
+        {            
             // Add some sample player data
             PlayerRanking.Instance.AddPlayerScore("Alice", 150, true);
             PlayerRanking.Instance.AddPlayerScore("Bob", 120, false);
@@ -22,7 +40,12 @@ public class RankingTestData : MonoBehaviour
             PlayerRanking.Instance.AddPlayerScore("Bob", 80, true);
             PlayerRanking.Instance.AddPlayerScore("Charlie", 30, false);
             
-            Debug.Log("Test data added to ranking system");
+            // Force update the ranking display
+            var rankingDisplay = FindObjectOfType<RankingDisplay>();
+            if (rankingDisplay != null)
+            {
+                rankingDisplay.UpdateRankingDisplay();
+            }
         }
     }
 
