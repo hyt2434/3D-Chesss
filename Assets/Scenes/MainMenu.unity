@@ -317,7 +317,7 @@ MonoBehaviour:
   botButton: {fileID: 1337174843}
   quitButton: {fileID: 324701614}
   confirmDialog: {fileID: 835474209}
-  rankingDisplayRef: {fileID: 0}
+  rankingDisplayRef: {fileID: 1903655023}
 --- !u!1 &44629769
 GameObject:
   m_ObjectHideFlags: 0
@@ -2793,6 +2793,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   isSinglePlayerMode: 0
   canResume: 0
+  isPlayerWhite: 1
 --- !u!4 &1071553987
 Transform:
   m_ObjectHideFlags: 0

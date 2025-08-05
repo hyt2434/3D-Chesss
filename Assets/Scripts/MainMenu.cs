@@ -26,16 +26,15 @@ public class MainMenuController : MonoBehaviour
     [Tooltip("The ranking display component")]
     public MonoBehaviour rankingDisplayRef;
 
+
+
     void Start()
     {
-        // Initialize ranking display
+        // --- Ranking Display (unchanged) ---
         if (rankingDisplayRef != null && rankingDisplayRef.GetType().Name == "RankingDisplay")
         {
             var updateMethod = rankingDisplayRef.GetType().GetMethod("UpdateRankingDisplay");
-            if (updateMethod != null)
-            {
-                updateMethod.Invoke(rankingDisplayRef, null);
-            }
+            updateMethod?.Invoke(rankingDisplayRef, null);
         }
 
         // 1) Should we show "Resume"? (only if we came via Pause→Home)
@@ -50,43 +49,32 @@ public class MainMenuController : MonoBehaviour
             SceneManager.UnloadSceneAsync("MainMenu");
         });
 
-        // 3) Multiplayer path always goes through TimerMenu
+        // 3) Multiplayer → TimerMenu (unchanged)
         multiplayerButton.onClick.AddListener(() =>
         {
             if (canResume)
             {
-                // hide main menu while we ask
                 mainMenuPanel.SetActive(false);
-
                 confirmDialog.Show(
                     "ARE YOU SURE YOU WANT TO START A NEW GAME?",
                     onYes: () =>
                     {
-                        // clear the resume flag
                         GameManager.Instance.canResume = false;
-                        // make sure we're no longer in single-player/bot mode
                         GameManager.Instance.isSinglePlayerMode = false;
-                        // unload this menu
                         SceneManager.UnloadSceneAsync("MainMenu");
-                        // now pick timer settings
                         SceneManager.LoadScene("TimerMenu");
                     },
-                    onNo: () =>
-                    {
-                        // user canceled → show main menu again
-                        mainMenuPanel.SetActive(true);
-                    }
+                    onNo: () => mainMenuPanel.SetActive(true)
                 );
             }
             else
             {
-                // direct start → ensure multiplayer mode, then timer
                 GameManager.Instance.isSinglePlayerMode = false;
                 SceneManager.LoadScene("TimerMenu");
             }
         });
 
-        // 4) Play With Bot stays the same
+        // 4) Play With Bot - shows side selection panel
         botButton.onClick.AddListener(() =>
         {
             if (canResume)
@@ -98,26 +86,21 @@ public class MainMenuController : MonoBehaviour
                     {
                         GameManager.Instance.canResume = false;
                         GameManager.Instance.isSinglePlayerMode = true;
-                        SceneManager.UnloadSceneAsync("MainMenu");
-                        GameManager.Instance.StartBotGame();
+                        SceneManager.LoadScene("SideSelectionMenu");
                     },
-                    onNo: () =>
-                    {
-                        mainMenuPanel.SetActive(true);
-                    }
+                    onNo: () => mainMenuPanel.SetActive(true)
                 );
             }
             else
             {
                 GameManager.Instance.isSinglePlayerMode = true;
-                GameManager.Instance.StartBotGame();
+                SceneManager.LoadScene("SideSelectionMenu");
             }
         });
 
-        // 5) Quit the application
-        quitButton.onClick.AddListener(() =>
-        {
-            Application.Quit();
-        });
+        // 5) Quit
+        quitButton.onClick.AddListener(() => Application.Quit());
     }
+
+
 }
