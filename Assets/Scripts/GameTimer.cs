@@ -18,27 +18,40 @@ public class GameTimer : MonoBehaviour
     int initialTotal;
     int initialBonus;
 
-    void Start()
+    void Awake()
     {
-        // 1) Hide winning screen up front
-        if (winningScreen != null)
-            winningScreen.SetActive(false);
+        // If playing vs bot, disable timer completely
+        if (GameManager.Instance != null && GameManager.Instance.isSinglePlayerMode)
+        {
+            gameObject.SetActive(false);
+            return;
+        }
 
-        // 2) Read timer mode
+        // Respect TimerMenu setting for multiplayer
         useTimer = (PlayerPrefs.GetInt("UseTimer", 0) == 1);
         if (!useTimer)
         {
             gameObject.SetActive(false);
             return;
         }
+    }
 
-        // 3) Initialize clocks
+    void Start()
+    {
+        if (!gameObject.activeInHierarchy) return;
+
+        if (winningScreen != null) winningScreen.SetActive(false);
+
         initialTotal = PlayerPrefs.GetInt("GameTimerSeconds", 300);
         initialBonus = PlayerPrefs.GetInt("BonusSeconds", 0);
         bonusTime = initialBonus;
-        // initialize
+
         whiteTime = blackTime = initialTotal;
         running = true;
+
+        // Initialize UI once
+        if (whiteTimerText) whiteTimerText.text = Format(whiteTime);
+        if (blackTimerText) blackTimerText.text = Format(blackTime);
     }
 
     void Update()
@@ -49,27 +62,28 @@ public class GameTimer : MonoBehaviour
         if (isWhiteTurn) whiteTime = Mathf.Max(0f, whiteTime - dt);
         else blackTime = Mathf.Max(0f, blackTime - dt);
 
-        whiteTimerText.text = Format(whiteTime);
-        blackTimerText.text = Format(blackTime);
+        if (whiteTimerText) whiteTimerText.text = Format(whiteTime);
+        if (blackTimerText) blackTimerText.text = Format(blackTime);
 
-        // 4) Time-up?
+        // Time up?
         if (whiteTime <= 0f || blackTime <= 0f)
         {
             running = false;
             bool whiteWins = (blackTime <= 0f);
 
-            // 5) Show the winning screen
             if (winningScreen != null)
             {
+                for (int i = 0; i < winningScreen.transform.childCount; i++)
+                    winningScreen.transform.GetChild(i).gameObject.SetActive(false);
+
                 winningScreen.SetActive(true);
-                int winnerIndex = whiteWins ? 0 : 1;
-                // Assumes child[0] = White-win UI, child[1] = Black-win UI
-                winningScreen.transform.GetChild(winnerIndex).gameObject.SetActive(true);
+                int winnerIndex = whiteWins ? 0 : 1; // 0=WHITE WINS, 1=BLACK WINS
+                if (winnerIndex < winningScreen.transform.childCount)
+                    winningScreen.transform.GetChild(winnerIndex).gameObject.SetActive(true);
             }
 
-            Debug.Log(whiteWins
-                ? "⏰ Black flagged — White wins!"
-                : "⏰ White flagged — Black wins!");
+            Debug.Log(whiteWins ? "⏰ Black flagged — White wins!"
+                                : "⏰ White flagged — Black wins!");
         }
     }
 
@@ -81,11 +95,6 @@ public class GameTimer : MonoBehaviour
         isWhiteTurn = !isWhiteTurn;
     }
 
-    string Format(float t)
-    {
-        int sec = Mathf.CeilToInt(t);
-        return $"{sec / 60:00}:{sec % 60:00}";
-    }
     public void ResetTimers()
     {
         if (!useTimer) return;
@@ -94,9 +103,14 @@ public class GameTimer : MonoBehaviour
         bonusTime = initialBonus;
         isWhiteTurn = true;
         running = true;
-        // update your UI immediately
-        whiteTimerText.text = Format(whiteTime);
-        blackTimerText.text = Format(blackTime);
+
+        if (whiteTimerText) whiteTimerText.text = Format(whiteTime);
+        if (blackTimerText) blackTimerText.text = Format(blackTime);
     }
 
+    string Format(float t)
+    {
+        int sec = Mathf.CeilToInt(t);
+        return $"{sec / 60:00}:{sec % 60:00}";
+    }
 }
