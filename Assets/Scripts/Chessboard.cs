@@ -46,19 +46,83 @@ public class Chessboard : MonoBehaviour
     public ScoreManager scoreManager;
     private void Awake()
     {
-        isItWhiteTurn = true;
+        // Ensure only one Chessboard is active at a time
+        // This prevents conflicts when multiple Game scenes might be loaded
+        Chessboard[] existingChessboards = FindObjectsOfType<Chessboard>();
+        foreach (Chessboard board in existingChessboards)
+        {
+            if (board != this && board.gameObject.scene != this.gameObject.scene)
+            {
+                Debug.Log($"Destroying old Chessboard from scene: {board.gameObject.scene.name}");
+                Destroy(board.gameObject);
+            }
+        }
+
+        // Initialize all game state variables to ensure clean start
+        InitializeGameState();
 
         GenerateAllTiles(tileSize, TILE_COUNT_X, TILE_COUNT_Y);
         SpawnAllPieces();
         PositionAllPieces();
     }
 
+    // Initialize all game state variables for a fresh game
+    private void InitializeGameState()
+    {
+        Debug.Log("Initializing fresh game state for Chessboard");
+        
+        // Reset turn state
+        isItWhiteTurn = true;
+        
+        // Reset dragging state - this is crucial for pickup animation
+        currentlyDragging = null;
+        currentHover = -Vector2Int.one;
+        
+        // Clear move lists
+        availableMoves.Clear();
+        moveList.Clear();
+        deadWhites.Clear();
+        deadBlacks.Clear();
+        
+        // Reset special move state
+        specialMoves = SpecialMove.Nothing;
+        
+        // Clear camera reference to force re-detection
+        currentCamera = null;
+        
+        Debug.Log($"Game state initialized - dragOffset: {dragOffset}, currentlyDragging: {currentlyDragging}");
+    }
+
     private void Update()
     {
         if (!currentCamera)
         {
-            currentCamera = Camera.main;
-            if (!currentCamera) return;
+            Camera[] cameras = FindObjectsOfType<Camera>();
+            foreach (Camera cam in cameras)
+            {
+                if (cam.gameObject.scene == this.gameObject.scene && cam.enabled)
+                {
+                    currentCamera = cam;
+                    Debug.Log($"Found camera for chessboard: {cam.name} in scene {cam.gameObject.scene.name}");
+                    break;
+                }
+            }
+            
+            // Fallback to Camera.main if no camera found in current scene
+            if (!currentCamera)
+            {
+                currentCamera = Camera.main;
+                if (currentCamera)
+                {
+                    Debug.Log($"Using Camera.main as fallback: {currentCamera.name}");
+                }
+            }
+            
+            if (!currentCamera) 
+            {
+                Debug.LogError("No camera found for chessboard! Pickup animation will not work.");
+                return;
+            }
         }
 
         RaycastHit info;
@@ -90,6 +154,9 @@ public class Chessboard : MonoBehaviour
                     if ((chessPieces[hitPosition.x, hitPosition.y].team == 0 && isItWhiteTurn) || (chessPieces[hitPosition.x, hitPosition.y].team == 1 && !isItWhiteTurn))
                     {
                         currentlyDragging = chessPieces[hitPosition.x, hitPosition.y];
+                        
+                        // Debug log when piece is selected for dragging
+                        Debug.Log($"Selected piece for dragging: {currentlyDragging.name} at ({hitPosition.x},{hitPosition.y}), dragOffset={dragOffset}");
 
                         // get a list of available moves for this piece, highlight tiles as well
                         availableMoves = currentlyDragging.GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
@@ -139,7 +206,18 @@ public class Chessboard : MonoBehaviour
             float distance = 0.0f;
             if (horizontalPlane.Raycast(ray, out distance))
             {
-                currentlyDragging.SetPosition(ray.GetPoint(distance) + Vector3.up * dragOffset);
+                Vector3 targetPosition = ray.GetPoint(distance) + Vector3.up * dragOffset;
+                currentlyDragging.SetPosition(targetPosition);
+                
+                // Debug log to track pickup animation (only log occasionally to avoid spam)
+                if (Time.frameCount % 30 == 0) // Log every 30 frames
+                {
+                    Debug.Log($"Dragging piece {currentlyDragging.name}: dragOffset={dragOffset}, targetPos={targetPosition}, rayPoint={ray.GetPoint(distance)}");
+                }
+            }
+            else
+            {
+                Debug.LogWarning($"Failed to raycast for dragging piece {currentlyDragging.name}");
             }
         }
     }
@@ -225,9 +303,19 @@ public class Chessboard : MonoBehaviour
     }
     private void PositionSinglePiece(int x, int y, bool force = false)
     {
+        if (chessPieces[x, y] == null)
+        {
+            Debug.LogError($"No piece at position ({x},{y}) to position!");
+            return;
+        }
+        
         chessPieces[x, y].currentX = x;
         chessPieces[x, y].currentY = y;
-        chessPieces[x, y].SetPosition(GetTileCenter(x, y), force);
+        Vector3 targetPosition = GetTileCenter(x, y);
+        Debug.Log($"Positioning piece {chessPieces[x, y].name} at ({x},{y}) to world position {targetPosition} in scene {gameObject.scene.name}, force={force}");
+        Debug.Log($"Piece current position before SetPosition: {chessPieces[x, y].transform.position}");
+        chessPieces[x, y].SetPosition(targetPosition, force);
+        Debug.Log($"Piece position after SetPosition: {chessPieces[x, y].transform.position}");
     }
     private Vector3 GetTileCenter(int x, int y)
     {
@@ -278,10 +366,14 @@ public class Chessboard : MonoBehaviour
         winningScreen.transform.GetChild(1).gameObject.SetActive(false);
         winningScreen.SetActive(false);
 
-        // reset drag & move lists
+        // reset drag & move lists and all game state
         currentlyDragging = null;
+        currentHover = -Vector2Int.one;
         availableMoves.Clear();
         moveList.Clear();
+        specialMoves = SpecialMove.Nothing;
+        
+        Debug.Log("Game restarted - all dragging state reset");
 
         // destroy and clear pieces
         for (int x = 0; x < TILE_COUNT_X; x++)
@@ -308,8 +400,9 @@ public class Chessboard : MonoBehaviour
 
     public void OnExitButton()
     {
+        if (Time.timeScale == 0f) Time.timeScale = 1f;
         // go back to your MainMenu scene
-        SceneManager.LoadScene("MainMenu");
+        SceneManager.LoadScene("MainMenu", LoadSceneMode.Single);
     }
 
     //Features
@@ -642,7 +735,7 @@ public class Chessboard : MonoBehaviour
         chessPieces[x, y] = cp;
         chessPieces[previousPosition.x, previousPosition.y] = null;
 
-        PositionSinglePiece(x, y);
+        PositionSinglePiece(x, y, true); // Force immediate positioning instead of lerping
 
 
         isItWhiteTurn = !isItWhiteTurn;
