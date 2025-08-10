@@ -30,12 +30,12 @@ public class PauseMenuController : MonoBehaviour
     /// </summary>
     public void OnHome()
     {
-        // restore time scaling
-        Time.timeScale = 1f;
-        // unload PauseMenu
-        SceneManager.UnloadSceneAsync("PauseMenu");
-        // go back to MainMenu
-        SceneManager.LoadScene("MainMenu");
+        Time.timeScale = 0f;
+        GameManager.Instance.canResume = true;
+
+        // Load MainMenu as overlay so we can Resume the current game
+        if (!SceneManager.GetSceneByName("MainMenu").isLoaded)
+            SceneManager.LoadScene("MainMenu", LoadSceneMode.Additive);
     }
 
     /// <summary>
