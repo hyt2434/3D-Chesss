@@ -27,6 +27,12 @@ public class Chessboard : MonoBehaviour
     [Header("Prefabs & Materials")]
     [SerializeField] private GameObject[] prefabs;
     [SerializeField] private Material[] teamMaterials;
+    
+    [Header("Bot Settings")]
+    [SerializeField] private ChessAI chessAI;
+    [SerializeField] private float botMoveDelay = 1.0f;
+    [SerializeField] private bool showBotThinkingIndicator = true;
+    
     // LOGIC
     private ChessPiece[,] chessPieces;
     private ChessPiece currentlyDragging;
@@ -44,6 +50,12 @@ public class Chessboard : MonoBehaviour
     private List<Vector2Int[]> moveList = new List<Vector2Int[]>();
     public GameTimer timerManager;
     public ScoreManager scoreManager;
+    
+    // Bot game variables
+    private bool isBotGame = false;
+    private bool isBotTurn = false;
+    private bool isPlayerWhite = true;
+    private bool isBotThinking = false;
     private void Awake()
     {
         // Ensure only one Chessboard is active at a time
@@ -90,6 +102,9 @@ public class Chessboard : MonoBehaviour
         // Clear camera reference to force re-detection
         currentCamera = null;
         
+        // Initialize bot game settings
+        InitializeBotGame();
+        
         Debug.Log($"Game state initialized - dragOffset: {dragOffset}, currentlyDragging: {currentlyDragging}");
     }
 
@@ -125,6 +140,18 @@ public class Chessboard : MonoBehaviour
             }
         }
 
+        // Check if it's bot's turn
+        if (isBotGame && isBotTurn)
+        {
+            return; // Don't process player input during bot's turn
+        }
+
+        // Check if player can make a move
+        if (isBotGame && !CanPlayerMove())
+        {
+            return; // Don't process player input if it's not their turn or bot is thinking
+        }
+
         RaycastHit info;
         Ray ray = currentCamera.ScreenPointToRay(Input.mousePosition);
 
@@ -150,8 +177,22 @@ public class Chessboard : MonoBehaviour
             {
                 if (chessPieces[hitPosition.x, hitPosition.y] != null)
                 {
-                    // is it our turn?
-                    if ((chessPieces[hitPosition.x, hitPosition.y].team == 0 && isItWhiteTurn) || (chessPieces[hitPosition.x, hitPosition.y].team == 1 && !isItWhiteTurn))
+                    bool canSelectPiece = false;
+                    
+                    if (isBotGame)
+                    {
+                        // In bot games, check if it's the player's turn and the piece belongs to the player
+                        canSelectPiece = ((chessPieces[hitPosition.x, hitPosition.y].team == 0 && isItWhiteTurn && isPlayerWhite) || 
+                                        (chessPieces[hitPosition.x, hitPosition.y].team == 1 && !isItWhiteTurn && !isPlayerWhite));
+                    }
+                    else
+                    {
+                        // In multiplayer games, check if it's the correct player's turn
+                        canSelectPiece = ((chessPieces[hitPosition.x, hitPosition.y].team == 0 && isItWhiteTurn) || 
+                                        (chessPieces[hitPosition.x, hitPosition.y].team == 1 && !isItWhiteTurn));
+                    }
+                    
+                    if (canSelectPiece)
                     {
                         currentlyDragging = chessPieces[hitPosition.x, hitPosition.y];
                         
@@ -164,7 +205,6 @@ public class Chessboard : MonoBehaviour
                         specialMoves = currentlyDragging.GetSpecialMoves(ref chessPieces, ref moveList, ref availableMoves);
                         PreventingCheck();
                         HighlightTiles();
-
                     }
                 }
             }
@@ -396,6 +436,17 @@ public class Chessboard : MonoBehaviour
         // **reset the timers** back to initial values
         if (timerManager != null)
             timerManager.ResetTimers();
+
+        // **reset the scores** back to zero
+        if (scoreManager != null)
+            scoreManager.ResetScores();
+
+        // Reinitialize bot game state if this is a bot game
+        if (isBotGame)
+        {
+            InitializeBotGame();
+            Debug.Log("Bot game restarted - bot state reinitialized");
+        }
     }
 
     public void OnExitButton()
@@ -593,12 +644,31 @@ public class Chessboard : MonoBehaviour
     }
     private int CHECKMATE()
     {
+        // Safety check: ensure moveList has moves and chessPieces is initialized
+        if (moveList == null || moveList.Count == 0 || chessPieces == null)
+        {
+            Debug.LogWarning("CHECKMATE: moveList or chessPieces not properly initialized");
+            return 0;
+        }
+
         var lastMove = moveList[moveList.Count - 1];
+        
+        // Safety check: ensure the move coordinates are valid
+        if (lastMove == null || lastMove.Length < 2 || 
+            lastMove[1].x < 0 || lastMove[1].x >= TILE_COUNT_X || 
+            lastMove[1].y < 0 || lastMove[1].y >= TILE_COUNT_Y ||
+            chessPieces[lastMove[1].x, lastMove[1].y] == null)
+        {
+            Debug.LogWarning("CHECKMATE: Invalid last move or piece position");
+            return 0;
+        }
+
         int targetTeam = (chessPieces[lastMove[1].x, lastMove[1].y].team == 0) ? 1 : 0;
 
         List<ChessPiece> attackingPieces = new List<ChessPiece>();
         List<ChessPiece> defendingPieces = new List<ChessPiece>();
         ChessPiece targetKing = null;
+        
         for (int i = 0; i < TILE_COUNT_X; i++)
             for (int j = 0; j < TILE_COUNT_Y; j++)
                 if (chessPieces[i, j] != null)
@@ -608,32 +678,45 @@ public class Chessboard : MonoBehaviour
                         defendingPieces.Add(chessPieces[i, j]);
                         if (chessPieces[i, j].type == ChessPieceType.King)
                             targetKing = chessPieces[i, j];
-
                     }
                     else
                     {
                         attackingPieces.Add(chessPieces[i, j]);
                     }
-
                 }
+
+        // Safety check: ensure we found a target king
+        if (targetKing == null)
+        {
+            Debug.LogWarning($"CHECKMATE: No king found for team {targetTeam}");
+            return 0;
+        }
+
         //Is the king being attacked? 
         List<Vector2Int> currentAvailableMoves = new List<Vector2Int>();
         for (int i = 0; i < attackingPieces.Count; i++)
         {
-            var pieceMove = attackingPieces[i].GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
-            for (int b = 0; b < pieceMove.Count; b++)
-                currentAvailableMoves.Add(pieceMove[b]);
+            if (attackingPieces[i] != null)
+            {
+                var pieceMove = attackingPieces[i].GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
+                for (int b = 0; b < pieceMove.Count; b++)
+                    currentAvailableMoves.Add(pieceMove[b]);
+            }
         }
+        
         //Are we in check? 
         if (ContainsValidMove(ref currentAvailableMoves, new Vector2Int(targetKing.currentX, targetKing.currentY)))
         {
             for (int i = 0; i < defendingPieces.Count; i++)
             {
-                List<Vector2Int> defendingMoves = defendingPieces[i].GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
-                SimulateMoveForSinglePiece(defendingPieces[i], ref defendingMoves, targetKing);
+                if (defendingPieces[i] != null)
+                {
+                    List<Vector2Int> defendingMoves = defendingPieces[i].GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
+                    SimulateMoveForSinglePiece(defendingPieces[i], ref defendingMoves, targetKing);
 
-                if (defendingMoves.Count != 0)
-                    return 0;
+                    if (defendingMoves.Count != 0)
+                        return 0;
+                }
             }
             return 1; //checkmate
         }
@@ -641,14 +724,15 @@ public class Chessboard : MonoBehaviour
         {
             for (int i = 0; i < defendingPieces.Count; i++)
             {
-                List<Vector2Int> defendingMoves = defendingPieces[i].GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
-                SimulateMoveForSinglePiece(defendingPieces[i], ref defendingMoves, targetKing);
-                if (defendingMoves.Count != 0)
-                    return 0;
+                if (defendingPieces[i] != null)
+                {
+                    List<Vector2Int> defendingMoves = defendingPieces[i].GetAvailableMoves(ref chessPieces, TILE_COUNT_X, TILE_COUNT_Y);
+                    SimulateMoveForSinglePiece(defendingPieces[i], ref defendingMoves, targetKing);
+                    if (defendingMoves.Count != 0)
+                        return 0;
+                }
             }
             return 2; //staleMate Exit
-
-
         }
     }
 
@@ -665,6 +749,403 @@ public class Chessboard : MonoBehaviour
         }
         return false;
     }
+
+    private Vector2Int LookupTileIndex(GameObject hitInfo)
+    {
+        for (int x = 0; x < TILE_COUNT_X; x++)
+            for (int y = 0; y < TILE_COUNT_Y; y++)
+                if (tiles[x, y] == hitInfo)
+                    return new Vector2Int(x, y);
+
+        return -Vector2Int.one; // Invalid
+    }
+
+    // Bot game methods
+    public void SetBotGameMode(bool enabled, bool playerIsWhite = true)
+    {
+        isBotGame = enabled;
+        isPlayerWhite = playerIsWhite;
+        isBotTurn = false;
+        isBotThinking = false;
+        
+        if (enabled)
+        {
+            Debug.Log($"Bot game mode {(enabled ? "enabled" : "disabled")} - Player is {(playerIsWhite ? "White" : "Black")}");
+        }
+    }
+
+    public bool IsBotGame() => isBotGame;
+    public bool IsBotTurn() => isBotTurn;
+    public bool IsPlayerWhite() => isPlayerWhite;
+    public bool IsBotThinking() => isBotThinking;
+    
+    public void ForceBotTurn()
+    {
+        if (isBotGame && !isBotThinking)
+        {
+            isBotTurn = true;
+            Invoke(nameof(MakeBotMove), botMoveDelay);
+            Debug.Log("Bot turn forced manually");
+        }
+        else
+        {
+            Debug.LogWarning("Cannot force bot turn - conditions not met");
+        }
+    }
+
+    public void SetBotMoveDelay(float delay)
+    {
+        botMoveDelay = Mathf.Max(0.1f, delay); // Minimum 0.1 second delay
+        Debug.Log($"Bot move delay set to {botMoveDelay} seconds");
+    }
+
+    public float GetBotMoveDelay() => botMoveDelay;
+
+    public void StopBot()
+    {
+        isBotTurn = false;
+        isBotThinking = false;
+        CancelInvoke(nameof(MakeBotMove));
+        Debug.Log("Bot stopped");
+    }
+
+    public void ResumeBot()
+    {
+        if (isBotGame && !isBotThinking)
+        {
+            bool shouldBeBotTurn = (isItWhiteTurn && !isPlayerWhite) || (!isItWhiteTurn && isPlayerWhite);
+            if (shouldBeBotTurn)
+            {
+                isBotTurn = true;
+                Invoke(nameof(MakeBotMove), botMoveDelay);
+                Debug.Log("Bot resumed");
+            }
+        }
+    }
+
+    public string GetGameStatus()
+    {
+        if (!isBotGame)
+            return "Multiplayer Game";
+        
+        string playerSide = isPlayerWhite ? "White" : "Black";
+        string currentTurn = isItWhiteTurn ? "White" : "Black";
+        string botStatus = isBotThinking ? " (Bot thinking...)" : "";
+        
+        return $"Bot Game - You are {playerSide}, {currentTurn}'s turn{botStatus}";
+    }
+
+    public bool CanPlayerMove()
+    {
+        if (!isBotGame)
+            return true; // In multiplayer, players can always move on their turn
+        
+        // Check if it's the player's turn and the bot is not thinking
+        bool isPlayerTurn = (isItWhiteTurn && isPlayerWhite) || (!isItWhiteTurn && !isPlayerWhite);
+        return isPlayerTurn && !isBotThinking;
+    }
+
+    public void SetBotDifficulty(int depth)
+    {
+        if (chessAI != null)
+        {
+            // The ChessAI uses depth parameter for difficulty
+            // Higher depth = stronger bot but slower moves
+            depth = Mathf.Clamp(depth, 1, 5); // Limit depth between 1-5 for reasonable performance
+            Debug.Log($"Bot difficulty set to depth {depth}");
+        }
+        else
+        {
+            Debug.LogWarning("Cannot set bot difficulty - ChessAI not assigned");
+        }
+    }
+
+    public int GetBotDifficulty()
+    {
+        if (chessAI != null)
+        {
+            // Return the current depth setting (default is 3)
+            return 3; // This could be made configurable in the future
+        }
+        return 0; // No AI available
+    }
+
+    public bool IsBotAvailable()
+    {
+        return chessAI != null;
+    }
+
+    public string GetBotInfo()
+    {
+        string info = $"Bot Game: {isBotGame}\n";
+        info += $"Bot Turn: {isBotTurn}\n";
+        info += $"Player White: {isPlayerWhite}\n";
+        info += $"Bot Thinking: {isBotThinking}\n";
+        info += $"Current Turn: {(isItWhiteTurn ? "White" : "Black")}\n";
+        info += $"ChessAI Assigned: {chessAI != null}\n";
+        info += $"Bot Move Delay: {botMoveDelay}\n";
+        info += $"GameManager SinglePlayer: {(GameManager.Instance != null ? GameManager.Instance.isSinglePlayerMode : "null")}\n";
+        info += $"GameManager PlayerWhite: {(GameManager.Instance != null ? GameManager.Instance.isPlayerWhite : "null")}";
+        
+        return info;
+    }
+
+    private void InitializeBotGame()
+    {
+        if (GameManager.Instance != null && GameManager.Instance.isSinglePlayerMode)
+        {
+            isBotGame = true;
+            isPlayerWhite = GameManager.Instance.isPlayerWhite;
+            isBotThinking = false;
+            
+            // Auto-assign ChessAI if not already assigned
+            if (chessAI == null)
+            {
+                AutoAssignChessAI();
+            }
+            
+            // Reset opening strategy for variety
+            if (chessAI != null)
+            {
+                // Force the ChessAI to choose a new opening strategy
+                chessAI.ResetOpeningStrategy();
+            }
+            
+            // Cancel any existing bot move invocations to prevent duplicates
+            CancelInvoke(nameof(MakeBotMove));
+            
+            // If player is black, bot goes first
+            if (!isPlayerWhite)
+            {
+                isBotTurn = true;
+                Invoke(nameof(MakeBotMove), botMoveDelay);
+            }
+            
+            Debug.Log($"Bot game initialized - Player is {(isPlayerWhite ? "White" : "Black")}, Bot goes {(isPlayerWhite ? "second" : "first")}");
+        }
+        else
+        {
+            isBotGame = false;
+            isBotTurn = false;
+            isBotThinking = false;
+            CancelInvoke(nameof(MakeBotMove));
+            Debug.Log("Multiplayer game - no bot");
+        }
+    }
+
+    private void AutoAssignChessAI()
+    {
+        // First try to find existing ChessAI in the scene
+        ChessAI existingAI = FindObjectOfType<ChessAI>();
+        if (existingAI != null)
+        {
+            chessAI = existingAI;
+            Debug.Log($"Auto-assigned ChessAI: {existingAI.name}");
+            return;
+        }
+
+        // If no existing ChessAI, create one on this GameObject
+        chessAI = gameObject.AddComponent<ChessAI>();
+        Debug.Log("Created new ChessAI component on Chessboard");
+        
+        // Verify the component was added successfully
+        if (chessAI == null)
+        {
+            Debug.LogError("Failed to create ChessAI component!");
+        }
+        else
+        {
+            Debug.Log("ChessAI component successfully created and assigned");
+        }
+    }
+
+    private void Start()
+    {
+        // Initialize bot game if this is a single player game
+        if (GameManager.Instance != null && GameManager.Instance.isSinglePlayerMode)
+        {
+            InitializeBotGame();
+        }
+    }
+
+    public void InitializeBotGameManually()
+    {
+        Debug.Log("Manually initializing bot game...");
+        if (GameManager.Instance != null && GameManager.Instance.isSinglePlayerMode)
+        {
+            InitializeBotGame();
+        }
+        else
+        {
+            Debug.LogWarning("Cannot initialize bot game - GameManager not found or not in single player mode");
+        }
+    }
+
+    private void MakeBotMove()
+    {
+        if (!isBotGame || !isBotTurn || isBotThinking)
+        {
+            Debug.LogWarning($"Cannot make bot move - conditions not met:");
+            Debug.LogWarning($"  isBotGame: {isBotGame}");
+            Debug.LogWarning($"  isBotTurn: {isBotTurn}");
+            Debug.LogWarning($"  isBotThinking: {isBotThinking}");
+            return;
+        }
+
+        // Auto-assign ChessAI if still null
+        if (chessAI == null)
+        {
+            Debug.LogWarning("ChessAI is null, attempting to auto-assign...");
+            AutoAssignChessAI();
+            
+            // If still null after auto-assignment, give up
+            if (chessAI == null)
+            {
+                Debug.LogError("Failed to assign ChessAI component. Bot cannot make moves.");
+                isBotThinking = false;
+                return;
+            }
+        }
+
+        // Pass current move count to ChessAI for opening detection
+        chessAI.SetMoveCount(moveList.Count);
+
+        isBotThinking = true;
+        Debug.Log("Bot is thinking...");
+        
+        // Find the best move for the bot
+        ChessAI.AIMove bestMove = chessAI.FindBestMove(chessPieces, isItWhiteTurn);
+        
+        if (bestMove.piece != null)
+        {
+            Debug.Log($"Bot found move: {bestMove.piece.type} from ({bestMove.piece.currentX},{bestMove.piece.currentY}) to ({bestMove.targetPosition.x},{bestMove.targetPosition.y})");
+            ExecuteBotMove(bestMove.piece, bestMove.targetPosition.x, bestMove.targetPosition.y);
+        }
+        else
+        {
+            Debug.LogWarning("Bot could not find a valid move!");
+            isBotThinking = false;
+        }
+    }
+
+    private void ExecuteBotMove(ChessPiece piece, int targetX, int targetY)
+    {
+        // Store the piece's current position
+        Vector2Int previousPosition = new Vector2Int(piece.currentX, piece.currentY);
+        
+        // Execute the move using the existing MoveTo logic but bypass bot turn logic
+        bool validMove = ExecuteMoveDirectly(piece, targetX, targetY);
+        
+        if (validMove)
+        {
+            // Move was successful, now it's the player's turn
+            isBotTurn = false;
+            isBotThinking = false;
+            Debug.Log("Bot move completed successfully");
+        }
+        else
+        {
+            Debug.LogError("Bot move failed - this shouldn't happen!");
+            // Reset the piece position if move failed
+            piece.SetPosition(GetTileCenter(previousPosition.x, previousPosition.y));
+            isBotTurn = false;
+            isBotThinking = false;
+        }
+    }
+
+    private bool ExecuteMoveDirectly(ChessPiece cp, int x, int y)
+    {
+        Vector2Int previousPosition = new Vector2Int(cp.currentX, cp.currentY);
+        
+        // Is there another piece at the target position?
+        if (chessPieces[x, y] != null)
+        {
+            ChessPiece ocp = chessPieces[x, y];
+            if (cp.team == ocp.team)
+            {
+                return false; 
+            }
+            int value = ocp.type switch
+            {
+                ChessPieceType.Pawn => 1,
+                ChessPieceType.Knight => 3,
+                ChessPieceType.Bishop => 3,
+                ChessPieceType.Rock => 5,
+                ChessPieceType.Queen => 9,
+                _ => 0
+            };
+
+            // award points
+            if (scoreManager != null)
+            {
+                scoreManager.AddPoints(cp.team, value);
+                Debug.Log($"Awarded {value} points to {(cp.team == 0 ? "White" : "Black")}");
+            }
+
+            // If its enemy piece, we can capture it
+            if (ocp.team == 0)
+            {
+                if (ocp.type == ChessPieceType.King)
+                {
+                    CheckMate(1);
+                }
+                deadWhites.Add(ocp);
+                Vector3 originalScale = ocp.transform.localScale * 2;
+
+                ocp.SetScale(originalScale * deadSize, true);
+                ocp.SetPosition(new Vector3(8 * tileSize, yOffset - 0.05f, -1 * tileSize) - bounds
+                    + new Vector3(tileSize / 2 - 0.17f , 0, tileSize / 2)
+                    + (Vector3.forward * deadSpacing * 1.2f) * deadWhites.Count, true);
+            }
+            else 
+            {
+                if (ocp.type == ChessPieceType.King)
+                {
+                    CheckMate(0);
+                }
+                deadBlacks.Add(ocp);
+                Vector3 originalScale = ocp.transform.localScale * 2;
+
+                ocp.SetScale(originalScale * deadSize, true);
+                ocp.SetPosition(new Vector3(-1 * tileSize, yOffset - 0.05f, 8 * tileSize) - bounds
+                    + new Vector3(tileSize / 2 + 0.17f, 0, tileSize / 2)
+                    + (Vector3.back * deadSpacing * 1.2f) * deadBlacks.Count, true);
+            }
+        }
+        
+        chessPieces[x, y] = cp;
+        chessPieces[previousPosition.x, previousPosition.y] = null;
+
+        PositionSinglePiece(x, y, true);
+
+        isItWhiteTurn = !isItWhiteTurn;
+        if (timerManager != null)
+        {
+            timerManager.SwitchTimer();
+        }
+
+        moveList.Add(new Vector2Int[] { previousPosition, new Vector2Int(x, y) });
+
+        BeforeSpecialMove();
+
+        CHECKMATE();
+
+        switch (CHECKMATE())
+        {
+            default:
+                break;
+            case 1:
+                CheckMate(cp.team);
+                break;
+            case 2:
+                CheckMate(2);
+                break;
+        }
+
+        return true;
+    }
+
+    // Override MoveTo to handle bot turns
     private bool MoveTo(ChessPiece cp, int x, int y)
     {
         if (!ContainsValidMove(ref availableMoves, new Vector2Int(x, y)))
@@ -737,14 +1218,11 @@ public class Chessboard : MonoBehaviour
 
         PositionSinglePiece(x, y, true); // Force immediate positioning instead of lerping
 
-
         isItWhiteTurn = !isItWhiteTurn;
         if (timerManager != null)
         {
             timerManager.SwitchTimer();
         }
-            
-
 
         moveList.Add(new Vector2Int[] { previousPosition, new Vector2Int(x, y) });
 
@@ -764,17 +1242,59 @@ public class Chessboard : MonoBehaviour
                 break;
         }
 
+        // Check if it's now the bot's turn
+        if (isBotGame && !isBotTurn)
+        {
+            bool isCurrentTurnBot = (isItWhiteTurn && !isPlayerWhite) || (!isItWhiteTurn && isPlayerWhite);
+            if (isCurrentTurnBot)
+            {
+                isBotTurn = true;
+                Invoke(nameof(MakeBotMove), botMoveDelay);
+            }
+        }
+
         return true;
-       
     }
-    private Vector2Int LookupTileIndex(GameObject hitInfo)
+
+    public void DebugBotState()
     {
-        for (int x = 0; x < TILE_COUNT_X; x++)
-            for (int y = 0; y < TILE_COUNT_Y; y++)
-                if (tiles[x, y] == hitInfo)
-                    return new Vector2Int(x, y);
-
-        return -Vector2Int.one; // Invalid
+        Debug.Log("=== BOT STATE DEBUG ===");
+        Debug.Log($"isBotGame: {isBotGame}");
+        Debug.Log($"isBotTurn: {isBotTurn}");
+        Debug.Log($"isPlayerWhite: {isPlayerWhite}");
+        Debug.Log($"isBotThinking: {isBotThinking}");
+        Debug.Log($"isItWhiteTurn: {isItWhiteTurn}");
+        Debug.Log($"chessAI assigned: {chessAI != null}");
+        Debug.Log($"GameManager.Instance: {(GameManager.Instance != null ? "exists" : "null")}");
+        if (GameManager.Instance != null)
+        {
+            Debug.Log($"GameManager.isSinglePlayerMode: {GameManager.Instance.isSinglePlayerMode}");
+            Debug.Log($"GameManager.isPlayerWhite: {GameManager.Instance.isPlayerWhite}");
+        }
+        Debug.Log("=======================");
     }
 
+    public void ForceBotInitialization()
+    {
+        Debug.Log("Force initializing bot game...");
+        if (GameManager.Instance != null && GameManager.Instance.isSinglePlayerMode)
+        {
+            isBotGame = true;
+            isPlayerWhite = GameManager.Instance.isPlayerWhite;
+            isBotTurn = false;
+            isBotThinking = false;
+            
+            // Ensure ChessAI is assigned
+            if (chessAI == null)
+            {
+                AutoAssignChessAI();
+            }
+            
+            Debug.Log($"Bot game force initialized - Player: {(isPlayerWhite ? "White" : "Black")}, Bot: {(isPlayerWhite ? "Black" : "White")}");
+        }
+        else
+        {
+            Debug.LogError("Cannot force initialize bot game - GameManager not found or not in single player mode");
+        }
+    }
 }
