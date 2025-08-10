@@ -34,9 +34,16 @@ public class MainMenuController : MonoBehaviour
 
     void InitializeMainMenu()
     {
-        // 1) Show Resume only if we came via Pause→Home
+        // (1) prevent stacked listeners when reopening MainMenu
+        resumeButton.onClick.RemoveAllListeners();
+        multiplayerButton.onClick.RemoveAllListeners();
+        botButton.onClick.RemoveAllListeners();
+        quitButton.onClick.RemoveAllListeners();
+
+        // 1) Show Resume only if we came via Pause→Home, and hide Quit in that case
         bool canResume = GameManager.Instance.canResume;
         resumeButton.gameObject.SetActive(canResume);
+        quitButton.gameObject.SetActive(!canResume);
 
         // 2) Resume → unpause & unload MainMenu
         resumeButton.onClick.AddListener(() =>
@@ -49,12 +56,8 @@ public class MainMenuController : MonoBehaviour
         // 3) Multiplayer (no opponent info; go straight to TimerMenu)
         multiplayerButton.onClick.AddListener(() =>
         {
-            if (canResume)
+            if (GameManager.Instance.canResume) // (2) use live flag
             {
-                // When confirming, hide Quit and show Resume as requested
-                quitButton.gameObject.SetActive(false);
-                resumeButton.gameObject.SetActive(true);
-
                 mainMenuPanel.SetActive(false);
                 confirmDialog.Show(
                     "ARE YOU SURE YOU WANT TO START A NEW GAME?",
@@ -64,16 +67,13 @@ public class MainMenuController : MonoBehaviour
                         GameManager.Instance.isSinglePlayerMode = false;
                         PlayerPrefs.SetString("MultiplayerSetup", "true");
                         PlayerPrefs.Save();
-
-                        // Go straight to TimerMenu (no PlayerMenu)
                         SceneManager.LoadScene("TimerMenu");
                     },
                     onNo: () =>
                     {
-                        // Restore UI
                         mainMenuPanel.SetActive(true);
-                        quitButton.gameObject.SetActive(true);
-                        resumeButton.gameObject.SetActive(true); // still coming from Pause
+                        quitButton.gameObject.SetActive(false);
+                        resumeButton.gameObject.SetActive(true);
                     }
                 );
             }
@@ -86,15 +86,11 @@ public class MainMenuController : MonoBehaviour
             }
         });
 
-        // 4) Play With Bot (no side selection; start Game directly, timer OFF)
+        // 4) Play With Bot -> ALWAYS go to SideSelectionMenu first
         botButton.onClick.AddListener(() =>
         {
-            if (canResume)
+            if (GameManager.Instance.canResume) // (2) use live flag
             {
-                // When confirming, hide Quit and show Resume as requested
-                quitButton.gameObject.SetActive(false);
-                resumeButton.gameObject.SetActive(true);
-
                 mainMenuPanel.SetActive(false);
                 confirmDialog.Show(
                     "ARE YOU SURE YOU WANT TO START A NEW GAME?",
@@ -102,20 +98,15 @@ public class MainMenuController : MonoBehaviour
                     {
                         GameManager.Instance.canResume = false;
                         GameManager.Instance.isSinglePlayerMode = true;
-
-                        // Force NO timer vs bot
                         PlayerPrefs.SetInt("UseTimer", 0);
                         PlayerPrefs.Save();
-
-                        // Go straight into Game scene
-                        SceneManager.LoadScene("Game");
+                        SceneManager.LoadScene("SideSelection"); // (3) correct scene name
                     },
                     onNo: () =>
                     {
-                        // Restore UI
                         mainMenuPanel.SetActive(true);
-                        quitButton.gameObject.SetActive(true);
-                        resumeButton.gameObject.SetActive(true); // still coming from Pause
+                        quitButton.gameObject.SetActive(false);
+                        resumeButton.gameObject.SetActive(true);
                     }
                 );
             }
@@ -124,7 +115,7 @@ public class MainMenuController : MonoBehaviour
                 GameManager.Instance.isSinglePlayerMode = true;
                 PlayerPrefs.SetInt("UseTimer", 0);
                 PlayerPrefs.Save();
-                SceneManager.LoadScene("Game");
+                SceneManager.LoadScene("SideSelection"); // (3) correct scene name
             }
         });
 

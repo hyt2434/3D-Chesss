@@ -15,6 +15,9 @@ EditorBuildSettings:
     path: Assets/Scenes/TimerMenu.unity
     guid: 8afc105cad9bed94b84ca3aa5b890122
   - enabled: 1
+    path: Assets/Scenes/SideSelection.unity
+    guid: 869cb8576dc045247817cbe1a544ed0c
+  - enabled: 1
     path: Assets/Scenes/Game.unity
     guid: 9fc0d4010bbf28b4594072e72b8655ab
   - enabled: 1

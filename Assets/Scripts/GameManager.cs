@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.SceneManagement;
 
 public class GameManager : MonoBehaviour
@@ -7,6 +7,7 @@ public class GameManager : MonoBehaviour
 
     public bool isSinglePlayerMode = false;
     public bool canResume = false;
+    public bool isPlayerWhite = true;
 
     void Awake()
     {
@@ -27,7 +28,10 @@ public class GameManager : MonoBehaviour
         isSinglePlayerMode = true;
         canResume = false;
 
-        PlayerPrefs.SetInt("UseTimer", 0); // make sure timer is off
+        // If we came from Pause→Home, unpause before loading a fresh scene
+        if (Time.timeScale == 0f) Time.timeScale = 1f;
+
+        PlayerPrefs.SetInt("UseTimer", 0); // make sure timer is off vs bot
         PlayerPrefs.Save();
 
         SceneManager.LoadScene("Game");
@@ -38,6 +42,9 @@ public class GameManager : MonoBehaviour
     {
         isSinglePlayerMode = false;
         canResume = false;
+
+        // Same: ensure not paused when starting a new match
+        if (Time.timeScale == 0f) Time.timeScale = 1f;
 
         SceneManager.LoadScene("Game");
     }
