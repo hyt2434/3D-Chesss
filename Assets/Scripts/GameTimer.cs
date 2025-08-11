@@ -84,6 +84,12 @@ public class GameTimer : MonoBehaviour
 
             Debug.Log(whiteWins ? "⏰ Black flagged — White wins!"
                                 : "⏰ White flagged — Black wins!");
+            
+            // Update player rankings for time-based wins
+            if (PlayerRanking.Instance != null)
+            {
+                UpdatePlayerRankingsForTimeWin(whiteWins);
+            }
         }
     }
 
@@ -112,5 +118,40 @@ public class GameTimer : MonoBehaviour
     {
         int sec = Mathf.CeilToInt(t);
         return $"{sec / 60:00}:{sec % 60:00}";
+    }
+
+    /// <summary>
+    /// Update player rankings for time-based wins
+    /// </summary>
+    private void UpdatePlayerRankingsForTimeWin(bool whiteWins)
+    {
+        string currentPlayerName = PlayerPrefs.GetString("CurrentPlayerName", "");
+        int currentPlayerAge = PlayerPrefs.GetInt("CurrentPlayerAge", -1);
+        
+        if (string.IsNullOrEmpty(currentPlayerName) || currentPlayerAge == -1)
+        {
+            Debug.LogWarning("No current player data found for time-based ranking update");
+            return;
+        }
+
+        // Get current player data
+        PlayerData currentPlayer = PlayerRanking.Instance.GetPlayerData(currentPlayerName, currentPlayerAge);
+        if (currentPlayer == null)
+        {
+            Debug.LogWarning($"Player data not found for {currentPlayerName} ({currentPlayerAge})");
+            return;
+        }
+
+        // Determine if current player won (assuming current player is white)
+        bool currentPlayerWon = whiteWins;
+        
+        // Update player stats and ranking
+        int rankingChange = currentPlayerWon ? 32 : -32;
+        int newRanking = Mathf.Max(0, currentPlayer.rankingPoints + rankingChange);
+        
+        PlayerRanking.Instance.UpdatePlayerStats(currentPlayerName, currentPlayerAge, currentPlayerWon);
+        PlayerRanking.Instance.UpdatePlayerRanking(currentPlayerName, currentPlayerAge, newRanking);
+        
+        Debug.Log($"Player {currentPlayerName} ranking updated (time win): {currentPlayer.rankingPoints} -> {newRanking} ({rankingChange:+0;-0})");
     }
 }

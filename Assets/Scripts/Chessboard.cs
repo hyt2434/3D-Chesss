@@ -391,12 +391,57 @@ public class Chessboard : MonoBehaviour
     private void CheckMate(int team)
     {
         DisplayVictory(team);
+        
+        // Update player rankings if this is a multiplayer game
+        if (!isBotGame && PlayerRanking.Instance != null)
+        {
+            UpdatePlayerRankings(team);
+        }
     }
 
     private void DisplayVictory(int victoryTeam)
     {
         winningScreen.SetActive(true);
         winningScreen.transform.GetChild(victoryTeam).gameObject.SetActive(true);
+    }
+
+    /// <summary>
+    /// Update player rankings after a game ends
+    /// </summary>
+    private void UpdatePlayerRankings(int winningTeam)
+    {
+        string currentPlayerName = PlayerPrefs.GetString("CurrentPlayerName", "");
+        int currentPlayerAge = PlayerPrefs.GetInt("CurrentPlayerAge", -1);
+        
+        if (string.IsNullOrEmpty(currentPlayerName) || currentPlayerAge == -1)
+        {
+            Debug.LogWarning("No current player data found for ranking update");
+            return;
+        }
+
+        // Get current player data
+        PlayerData currentPlayer = PlayerRanking.Instance.GetPlayerData(currentPlayerName, currentPlayerAge);
+        if (currentPlayer == null)
+        {
+            Debug.LogWarning($"Player data not found for {currentPlayerName} ({currentPlayerAge})");
+            return;
+        }
+
+        // Determine if current player won
+        // Assuming current player is always white (team 0) for simplicity
+        // You might want to store which side the current player is playing
+        bool currentPlayerWon = (winningTeam == 0); // 0 = white, 1 = black
+        
+        // For now, we'll use a simple ranking system
+        // In a real implementation, you'd want to consider opponent ranking
+        int rankingChange = currentPlayerWon ? 32 : -32;
+        int newRanking = Mathf.Max(0, currentPlayer.rankingPoints + rankingChange);
+        
+        // Update player stats
+        PlayerRanking.Instance.UpdatePlayerStats(currentPlayerName, currentPlayerAge, currentPlayerWon);
+        PlayerRanking.Instance.UpdatePlayerRanking(currentPlayerName, currentPlayerAge, newRanking);
+        
+        Debug.Log($"Player {currentPlayerName} ranking updated: {currentPlayer.rankingPoints} -> {newRanking} ({rankingChange:+0;-0})");
     }
     public void OnRestartButton()
     {

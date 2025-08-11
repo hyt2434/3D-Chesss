@@ -61,23 +61,15 @@ public class PlayerMenuController : MonoBehaviour
             return;
         }
 
-        int count = PlayerPrefs.GetInt("PlayerCount", 0);
-        // check duplicate
-        for (int i = 0; i < count; i++)
+        // Check if player already exists using PlayerRanking system
+        if (PlayerRanking.Instance.PlayerExists(name, age))
         {
-            if (PlayerPrefs.GetString($"Player_{i}_Name", "") == name &&
-                PlayerPrefs.GetInt($"Player_{i}_Age", -1) == age)
-            {
-                errorText.text = "Player already exists.";
-                return;
-            }
+            errorText.text = "Player already exists.";
+            return;
         }
 
-        // save new player
-        PlayerPrefs.SetString($"Player_{count}_Name", name);
-        PlayerPrefs.SetInt($"Player_{count}_Age", age);
-        PlayerPrefs.SetInt("PlayerCount", count + 1);
-        PlayerPrefs.Save();
+        // Add new player with default 1000 ranking points
+        PlayerRanking.Instance.AddNewPlayer(name, age);
 
         SceneManager.LoadScene("MainMenu");
     }
@@ -91,16 +83,16 @@ public class PlayerMenuController : MonoBehaviour
             return;
         }
 
-        int count = PlayerPrefs.GetInt("PlayerCount", 0);
-        for (int i = 0; i < count; i++)
+        // Check if player exists using PlayerRanking system
+        if (PlayerRanking.Instance.PlayerExists(name, age))
         {
-            if (PlayerPrefs.GetString($"Player_{i}_Name", "") == name &&
-                PlayerPrefs.GetInt($"Player_{i}_Age", -1) == age)
-            {
-                // found existing
-                SceneManager.LoadScene("MainMenu");
-                return;
-            }
+            // Store current player info for use in game
+            PlayerPrefs.SetString("CurrentPlayerName", name);
+            PlayerPrefs.SetInt("CurrentPlayerAge", age);
+            PlayerPrefs.Save();
+            
+            SceneManager.LoadScene("MainMenu");
+            return;
         }
 
         errorText.text = "No matching player found.";

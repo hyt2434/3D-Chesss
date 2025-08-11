@@ -3168,9 +3168,34 @@ MonoBehaviour:
   m_GameObject: {fileID: 1796295593}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 044a7c5d93ce12e4f814e0e830bbb6f0, type: 3}
+  m_Script: {fileID: 11500000, guid: f3924be5f5f0d024c979d9cb1e39bde2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  mainMenuPanel: {fileID: 0}
+  resumeButton: {fileID: 0}
+  multiplayerButton: {fileID: 0}
+  botButton: {fileID: 0}
+  quitButton: {fileID: 0}
+  confirmDialog: {fileID: 0}
+  playerNameTexts:
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  playerScoreTexts:
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  playerStatsTexts:
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  topPlayersPanel: {fileID: 0}
 --- !u!1 &1860250632
 GameObject:
   m_ObjectHideFlags: 0
