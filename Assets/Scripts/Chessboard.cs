@@ -410,38 +410,125 @@ public class Chessboard : MonoBehaviour
     /// </summary>
     private void UpdatePlayerRankings(int winningTeam)
     {
-        string currentPlayerName = PlayerPrefs.GetString("CurrentPlayerName", "");
-        int currentPlayerAge = PlayerPrefs.GetInt("CurrentPlayerAge", -1);
+        // Only apply multiplayer scoring if this is a multiplayer game
+        if (isBotGame)
+        {
+            Debug.Log("Bot game - using standard ranking system");
+            // Use standard ranking system for bot games
+            string currentPlayerName = PlayerPrefs.GetString("CurrentPlayerName", "");
+            int currentPlayerAge = PlayerPrefs.GetInt("CurrentPlayerAge", -1);
+            
+            if (string.IsNullOrEmpty(currentPlayerName) || currentPlayerAge == -1)
+            {
+                Debug.LogWarning("No current player data found for ranking update");
+                return;
+            }
+
+            PlayerData currentPlayer = PlayerRanking.Instance.GetPlayerData(currentPlayerName, currentPlayerAge);
+            if (currentPlayer == null)
+            {
+                Debug.LogWarning($"Player data not found for {currentPlayerName} ({currentPlayerAge})");
+                return;
+            }
+
+            bool currentPlayerWon = (winningTeam == 0);
+            int rankingChange = currentPlayerWon ? 32 : -32;
+            int newRanking = Mathf.Max(0, currentPlayer.rankingPoints + rankingChange);
+            
+            PlayerRanking.Instance.UpdatePlayerStats(currentPlayerName, currentPlayerAge, currentPlayerWon);
+            PlayerRanking.Instance.UpdatePlayerRanking(currentPlayerName, currentPlayerAge, newRanking);
+            
+            Debug.Log($"Player {currentPlayerName} ranking updated: {currentPlayer.rankingPoints} -> {newRanking} ({rankingChange:+0;-0})");
+            return;
+        }
         
-        if (string.IsNullOrEmpty(currentPlayerName) || currentPlayerAge == -1)
+        // Multiplayer game scoring system
+        string multiplayerPlayerName = PlayerPrefs.GetString("CurrentPlayerName", "");
+        int multiplayerPlayerAge = PlayerPrefs.GetInt("CurrentPlayerAge", -1);
+        string opponentName = PlayerPrefs.GetString("OpponentName", "");
+        int opponentAge = PlayerPrefs.GetInt("OpponentAge", -1);
+        
+        if (string.IsNullOrEmpty(multiplayerPlayerName) || multiplayerPlayerAge == -1)
         {
             Debug.LogWarning("No current player data found for ranking update");
             return;
         }
 
         // Get current player data
-        PlayerData currentPlayer = PlayerRanking.Instance.GetPlayerData(currentPlayerName, currentPlayerAge);
-        if (currentPlayer == null)
+        PlayerData multiplayerPlayer = PlayerRanking.Instance.GetPlayerData(multiplayerPlayerName, multiplayerPlayerAge);
+        if (multiplayerPlayer == null)
         {
-            Debug.LogWarning($"Player data not found for {currentPlayerName} ({currentPlayerAge})");
+            Debug.LogWarning($"Player data not found for {multiplayerPlayerName} ({multiplayerPlayerAge})");
             return;
         }
 
         // Determine if current player won
         // Assuming current player is always white (team 0) for simplicity
-        // You might want to store which side the current player is playing
-        bool currentPlayerWon = (winningTeam == 0); // 0 = white, 1 = black
+        bool multiplayerPlayerWon = (winningTeam == 0); // 0 = white, 1 = black
         
-        // For now, we'll use a simple ranking system
-        // In a real implementation, you'd want to consider opponent ranking
-        int rankingChange = currentPlayerWon ? 32 : -32;
-        int newRanking = Mathf.Max(0, currentPlayer.rankingPoints + rankingChange);
+        // Multiplayer scoring system
+        int currentPlayerPoints = 0;
+        int opponentPoints = 0;
         
-        // Update player stats
-        PlayerRanking.Instance.UpdatePlayerStats(currentPlayerName, currentPlayerAge, currentPlayerWon);
-        PlayerRanking.Instance.UpdatePlayerRanking(currentPlayerName, currentPlayerAge, newRanking);
+        if (multiplayerPlayerWon)
+        {
+            // Current player wins: +150 points
+            currentPlayerPoints = 150;
+            opponentPoints = -50;
+        }
+        else
+        {
+            // Current player loses: -50 points
+            currentPlayerPoints = -50;
+            opponentPoints = 150;
+        }
         
-        Debug.Log($"Player {currentPlayerName} ranking updated: {currentPlayer.rankingPoints} -> {newRanking} ({rankingChange:+0;-0})");
+        // Add bonus points for captured pieces
+        int currentPlayerCaptureBonus = CalculateCaptureBonus(winningTeam == 0 ? deadBlacks.Count : deadWhites.Count);
+        int opponentCaptureBonus = CalculateCaptureBonus(winningTeam == 0 ? deadWhites.Count : deadBlacks.Count);
+        
+        // Use ScoreManager for more accurate capture tracking
+        if (scoreManager != null)
+        {
+            currentPlayerCaptureBonus = scoreManager.GetCapturedPiecesValue(winningTeam == 0 ? 1 : 0); // Opponent's team
+            opponentCaptureBonus = scoreManager.GetCapturedPiecesValue(winningTeam == 0 ? 0 : 1); // Current player's team
+        }
+        
+        currentPlayerPoints += currentPlayerCaptureBonus;
+        opponentPoints += opponentCaptureBonus;
+        
+        // Update current player ranking
+        int newCurrentPlayerRanking = Mathf.Max(0, multiplayerPlayer.rankingPoints + currentPlayerPoints);
+        PlayerRanking.Instance.UpdatePlayerStats(multiplayerPlayerName, multiplayerPlayerAge, multiplayerPlayerWon);
+        PlayerRanking.Instance.UpdatePlayerRanking(multiplayerPlayerName, multiplayerPlayerAge, newCurrentPlayerRanking);
+        
+        Debug.Log($"Player {multiplayerPlayerName} ranking updated: {multiplayerPlayer.rankingPoints} -> {newCurrentPlayerRanking} ({currentPlayerPoints:+0;-0})");
+        Debug.Log($"Capture bonus: {currentPlayerCaptureBonus} points");
+        
+        // Update opponent ranking if opponent exists in the system
+        if (!string.IsNullOrEmpty(opponentName) && opponentAge != -1)
+        {
+            PlayerData opponent = PlayerRanking.Instance.GetPlayerData(opponentName, opponentAge);
+            if (opponent != null)
+            {
+                int newOpponentRanking = Mathf.Max(0, opponent.rankingPoints + opponentPoints);
+                PlayerRanking.Instance.UpdatePlayerStats(opponentName, opponentAge, !multiplayerPlayerWon);
+                PlayerRanking.Instance.UpdatePlayerRanking(opponentName, opponentAge, newOpponentRanking);
+                
+                Debug.Log($"Opponent {opponentName} ranking updated: {opponent.rankingPoints} -> {newOpponentRanking} ({opponentPoints:+0;-0})");
+                Debug.Log($"Opponent capture bonus: {opponentCaptureBonus} points");
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Calculate bonus points for captured pieces
+    /// </summary>
+    private int CalculateCaptureBonus(int capturedPiecesCount)
+    {
+        // Each captured piece gives bonus points
+        // This encourages aggressive play and piece capture
+        return capturedPiecesCount * 5; // 5 points per captured piece
     }
     public void OnRestartButton()
     {
@@ -1124,6 +1211,8 @@ public class Chessboard : MonoBehaviour
             if (scoreManager != null)
             {
                 scoreManager.AddPoints(cp.team, value);
+                // Track captured piece for multiplayer scoring
+                scoreManager.TrackCapturedPiece(ocp.team, ocp.type);
                 Debug.Log($"Awarded {value} points to {(cp.team == 0 ? "White" : "Black")}");
             }
 
@@ -1221,6 +1310,8 @@ public class Chessboard : MonoBehaviour
             if (scoreManager != null)
             {
                 scoreManager.AddPoints(cp.team, value);
+                // Track captured piece for multiplayer scoring
+                scoreManager.TrackCapturedPiece(ocp.team, ocp.type);
                 Debug.Log($"Awarded {value} points to {(cp.team == 0 ? "White" : "Black")}");
             }
             else

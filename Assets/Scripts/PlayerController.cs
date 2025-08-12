@@ -78,13 +78,13 @@ public class PlayerMenuController : MonoBehaviour
             {
                 text.text = "NEW OPPONENT";
                 // Make text smaller for multiplayer mode
-                text.fontSize = text.fontSize * 0.7f;
+                text.fontSize = text.fontSize * 0.8f;
             }
             else if (text.text.Contains("EXISTING PLAYER") || text.text.Contains("Existing Player"))
             {
                 text.text = "EXISTING OPPONENT";
                 // Make text smaller for multiplayer mode
-                text.fontSize = text.fontSize * 0.7f;
+                text.fontSize = text.fontSize * 0.8f;
             }
         }
     }
