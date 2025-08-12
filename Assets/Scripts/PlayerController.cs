@@ -53,23 +53,39 @@ public class PlayerMenuController : MonoBehaviour
     
     private void SetupMultiplayerOpponentSelection()
     {
-        // Hide selection panel, show input panel directly for opponent selection
-        selectionPanel.SetActive(false);
-        inputPanel.SetActive(true);
+        // Use the exact same UI structure as normal player selection
+        // Just update the text to indicate we're selecting an opponent
+        selectionPanel.SetActive(true);
+        inputPanel.SetActive(false);
         errorText.text = "";
 
-        // Show only play button (for selecting opponent)
         saveButton.SetActive(false);
-        playButton.SetActive(true);
+        playButton.SetActive(false);
         
-        // Update UI text to indicate opponent selection
-        if (nameInput != null)
+        // Update the selection panel text to show opponent context
+        UpdateSelectionPanelForMultiplayer();
+    }
+    
+    private void UpdateSelectionPanelForMultiplayer()
+    {
+        // Find and update the text for the selection buttons
+        // Keep the same button structure, just change the text and size
+        var selectionButtons = selectionPanel.GetComponentsInChildren<TextMeshProUGUI>();
+        
+        foreach (var text in selectionButtons)
         {
-            nameInput.placeholder.GetComponent<TextMeshProUGUI>().text = "OPPONENT NAME";
-        }
-        if (ageInput != null)
-        {
-            ageInput.placeholder.GetComponent<TextMeshProUGUI>().text = "OPPONENT AGE";
+            if (text.text.Contains("NEW PLAYER") || text.text.Contains("New Player"))
+            {
+                text.text = "NEW OPPONENT";
+                // Make text smaller for multiplayer mode
+                text.fontSize = text.fontSize * 0.7f;
+            }
+            else if (text.text.Contains("EXISTING PLAYER") || text.text.Contains("Existing Player"))
+            {
+                text.text = "EXISTING OPPONENT";
+                // Make text smaller for multiplayer mode
+                text.fontSize = text.fontSize * 0.7f;
+            }
         }
     }
 
@@ -80,8 +96,21 @@ public class PlayerMenuController : MonoBehaviour
         inputPanel.SetActive(true);
         errorText.text = "";
 
-        saveButton.SetActive(true);
-        playButton.SetActive(false);
+        if (isMultiplayerOpponentSelection)
+        {
+            // In multiplayer mode, creating new opponent
+            saveButton.SetActive(true);
+            playButton.SetActive(false);
+            
+            // Update input panel text for opponent creation
+            UpdateInputPanelForOpponent();
+        }
+        else
+        {
+            // Normal mode, creating new player
+            saveButton.SetActive(true);
+            playButton.SetActive(false);
+        }
     }
 
     public void OnOldPlayer()
@@ -91,8 +120,53 @@ public class PlayerMenuController : MonoBehaviour
         inputPanel.SetActive(true);
         errorText.text = "";
 
-        saveButton.SetActive(false);
-        playButton.SetActive(true);
+        if (isMultiplayerOpponentSelection)
+        {
+            // In multiplayer mode, selecting existing opponent
+            saveButton.SetActive(false);
+            playButton.SetActive(true);
+            
+            // Update input panel text for opponent selection
+            UpdateInputPanelForOpponent();
+        }
+        else
+        {
+            // Normal mode, selecting existing player
+            saveButton.SetActive(false);
+            playButton.SetActive(true);
+        }
+    }
+    
+    private void UpdateInputPanelForOpponent()
+    {
+        // Update UI text to indicate opponent selection
+        if (nameInput != null)
+        {
+            nameInput.placeholder.GetComponent<TextMeshProUGUI>().text = "OPPONENT NAME";
+        }
+        if (ageInput != null)
+        {
+            ageInput.placeholder.GetComponent<TextMeshProUGUI>().text = "OPPONENT AGE";
+        }
+        
+        // Update button text for multiplayer mode - keep it simple
+        if (saveButton != null && saveButton.activeInHierarchy)
+        {
+            TextMeshProUGUI saveButtonText = saveButton.GetComponentInChildren<TextMeshProUGUI>();
+            if (saveButtonText != null)
+            {
+                saveButtonText.text = "SAVE";
+            }
+        }
+        
+        if (playButton != null && playButton.activeInHierarchy)
+        {
+            TextMeshProUGUI playButtonText = playButton.GetComponentInChildren<TextMeshProUGUI>();
+            if (playButtonText != null)
+            {
+                playButtonText.text = "PLAY";
+            }
+        }
     }
 
     public void OnSave()
@@ -104,6 +178,20 @@ public class PlayerMenuController : MonoBehaviour
             return;
         }
 
+        if (isMultiplayerOpponentSelection)
+        {
+            // In multiplayer mode, we're creating a new opponent
+            HandleOpponentCreation(name, age);
+        }
+        else
+        {
+            // Normal mode, creating a new player
+            HandlePlayerCreation(name, age);
+        }
+    }
+    
+    private void HandlePlayerCreation(string name, int age)
+    {
         // Check if player already exists using PlayerRanking system
         if (PlayerRanking.Instance.PlayerExists(name, age))
         {
@@ -115,6 +203,28 @@ public class PlayerMenuController : MonoBehaviour
         PlayerRanking.Instance.AddNewPlayer(name, age);
 
         SceneManager.LoadScene("MainMenu");
+    }
+    
+    private void HandleOpponentCreation(string name, int age)
+    {
+        // Check if opponent already exists using PlayerRanking system
+        if (PlayerRanking.Instance.PlayerExists(name, age))
+        {
+            errorText.text = "Opponent already exists.";
+            return;
+        }
+
+        // Add new opponent with default 1000 ranking points
+        PlayerRanking.Instance.AddNewPlayer(name, age);
+        
+        // Store opponent info for use in game
+        PlayerPrefs.SetString("OpponentName", name);
+        PlayerPrefs.SetInt("OpponentAge", age);
+        PlayerPrefs.Save();
+        
+        // Clear multiplayer mode flag and go to timer menu
+        PlayerPrefs.DeleteKey("MultiplayerMode");
+        SceneManager.LoadScene("TimerMenu");
     }
 
     public void OnPlay()
