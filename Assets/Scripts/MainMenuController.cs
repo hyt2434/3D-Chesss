@@ -88,7 +88,7 @@ public class MainMenuController : MonoBehaviour
             SceneManager.UnloadSceneAsync("MainMenu");
         });
 
-        // 3) Multiplayer (no opponent info; go straight to TimerMenu)
+        // 3) Multiplayer -> go to PlayerMenu for opponent selection
         if (multiplayerButton != null) multiplayerButton.onClick.AddListener(() =>
         {
             Debug.Log("Multiplayer button clicked!");
@@ -102,8 +102,9 @@ public class MainMenuController : MonoBehaviour
                         GameManager.Instance.canResume = false;
                         GameManager.Instance.isSinglePlayerMode = false;
                         PlayerPrefs.SetString("MultiplayerSetup", "true");
+                        PlayerPrefs.SetString("MultiplayerMode", "opponent_selection");
                         PlayerPrefs.Save();
-                        SceneManager.LoadScene("TimerMenu");
+                        SceneManager.LoadScene("PlayerMenu");
                     },
                     onNo: () =>
                     {
@@ -117,8 +118,9 @@ public class MainMenuController : MonoBehaviour
             {
                 GameManager.Instance.isSinglePlayerMode = false;
                 PlayerPrefs.SetString("MultiplayerSetup", "true");
+                PlayerPrefs.SetString("MultiplayerMode", "opponent_selection");
                 PlayerPrefs.Save();
-                SceneManager.LoadScene("TimerMenu");
+                SceneManager.LoadScene("PlayerMenu");
             }
         });
 

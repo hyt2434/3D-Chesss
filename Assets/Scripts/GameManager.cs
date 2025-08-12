@@ -85,6 +85,28 @@ public class GameManager : MonoBehaviour
         Debug.Log("Starting Multiplayer Game - Loading Game scene in Single mode");
         SceneManager.LoadScene("Game", LoadSceneMode.Single);
     }
+    
+    // Get current player info
+    public string GetCurrentPlayerName()
+    {
+        return PlayerPrefs.GetString("CurrentPlayerName", "Player");
+    }
+    
+    public int GetCurrentPlayerAge()
+    {
+        return PlayerPrefs.GetInt("CurrentPlayerAge", 0);
+    }
+    
+    // Get opponent info
+    public string GetOpponentName()
+    {
+        return PlayerPrefs.GetString("OpponentName", "Opponent");
+    }
+    
+    public int GetOpponentAge()
+    {
+        return PlayerPrefs.GetInt("OpponentAge", 0);
+    }
 
     private void ResetGameState()
     {

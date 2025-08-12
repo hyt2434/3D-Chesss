@@ -13,8 +13,32 @@ public class TimerSetup : MonoBehaviour
     public TMP_InputField totalTimeInput;
     [Tooltip("Enter bonus time in seconds")]
     public TMP_InputField bonusTimeInput;
+    
+    [Header("Multiplayer Info")]
+    [Tooltip("Text to display opponent information")]
+    public TextMeshProUGUI opponentInfoText;
 
-    // Called by your “TIMER” button
+    void Start()
+    {
+        // Display opponent information if in multiplayer mode
+        if (PlayerPrefs.GetString("MultiplayerSetup", "") == "true" && opponentInfoText != null)
+        {
+            string opponentName = PlayerPrefs.GetString("OpponentName", "");
+            int opponentAge = PlayerPrefs.GetInt("OpponentAge", 0);
+            string currentPlayerName = PlayerPrefs.GetString("CurrentPlayerName", "");
+            
+            if (!string.IsNullOrEmpty(opponentName) && opponentAge > 0)
+            {
+                opponentInfoText.text = $"Player: {currentPlayerName} vs Opponent: {opponentName} ({opponentAge})";
+            }
+            else
+            {
+                opponentInfoText.text = "Multiplayer Game";
+            }
+        }
+    }
+
+    // Called by your "TIMER" button
     public void OnTimerChosen()
     {
         modePanel.SetActive(false);
@@ -26,6 +50,10 @@ public class TimerSetup : MonoBehaviour
     {
         PlayerPrefs.SetInt("UseTimer", 0);
         PlayerPrefs.Save();
+        
+        // Clear multiplayer setup flag
+        PlayerPrefs.DeleteKey("MultiplayerSetup");
+        
         SceneManager.LoadScene("Game");
     }
 
@@ -34,6 +62,22 @@ public class TimerSetup : MonoBehaviour
     {
         customPanel.SetActive(false);
         modePanel.SetActive(true);
+    }
+    
+    // Called by "Back" button in modePanel (if it exists)
+    public void OnBackToMain()
+    {
+        // If in multiplayer mode, go back to PlayerMenu for opponent selection
+        if (PlayerPrefs.GetString("MultiplayerSetup", "") == "true")
+        {
+            PlayerPrefs.SetString("MultiplayerMode", "opponent_selection");
+            SceneManager.LoadScene("PlayerMenu");
+        }
+        else
+        {
+            // Normal mode, go back to MainMenu
+            SceneManager.LoadScene("MainMenu");
+        }
     }
 
     // Called by “Start” in customPanel
@@ -53,6 +97,9 @@ public class TimerSetup : MonoBehaviour
         PlayerPrefs.SetInt("GameTimerSeconds", totalSeconds);
         PlayerPrefs.SetInt("BonusSeconds", bonusSeconds);
         PlayerPrefs.Save();
+        
+        // Clear multiplayer setup flag
+        PlayerPrefs.DeleteKey("MultiplayerSetup");
 
         // go to Game scene
         SceneManager.LoadScene("Game");

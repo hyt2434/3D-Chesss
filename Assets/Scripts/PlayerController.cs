@@ -19,8 +19,29 @@ public class PlayerMenuController : MonoBehaviour
 
     // track mode: true=new player, false=existing
     private bool isNewMode;
+    
+    // track if we're in multiplayer opponent selection mode
+    private bool isMultiplayerOpponentSelection;
 
     void Start()
+    {
+        // Check if we're in multiplayer opponent selection mode
+        isMultiplayerOpponentSelection = PlayerPrefs.GetString("MultiplayerMode", "") == "opponent_selection";
+        
+        if (isMultiplayerOpponentSelection)
+        {
+            // In multiplayer mode, we're selecting opponent
+            // Show different UI text and behavior
+            SetupMultiplayerOpponentSelection();
+        }
+        else
+        {
+            // Normal player selection mode
+            SetupNormalPlayerSelection();
+        }
+    }
+    
+    private void SetupNormalPlayerSelection()
     {
         selectionPanel.SetActive(true);
         inputPanel.SetActive(false);
@@ -28,6 +49,28 @@ public class PlayerMenuController : MonoBehaviour
 
         saveButton.SetActive(false);
         playButton.SetActive(false);
+    }
+    
+    private void SetupMultiplayerOpponentSelection()
+    {
+        // Hide selection panel, show input panel directly for opponent selection
+        selectionPanel.SetActive(false);
+        inputPanel.SetActive(true);
+        errorText.text = "";
+
+        // Show only play button (for selecting opponent)
+        saveButton.SetActive(false);
+        playButton.SetActive(true);
+        
+        // Update UI text to indicate opponent selection
+        if (nameInput != null)
+        {
+            nameInput.placeholder.GetComponent<TextMeshProUGUI>().text = "OPPONENT NAME";
+        }
+        if (ageInput != null)
+        {
+            ageInput.placeholder.GetComponent<TextMeshProUGUI>().text = "OPPONENT AGE";
+        }
     }
 
     public void OnNewPlayer()
@@ -83,6 +126,20 @@ public class PlayerMenuController : MonoBehaviour
             return;
         }
 
+        if (isMultiplayerOpponentSelection)
+        {
+            // In multiplayer mode, we're selecting opponent
+            HandleOpponentSelection(name, age);
+        }
+        else
+        {
+            // Normal player selection mode
+            HandlePlayerSelection(name, age);
+        }
+    }
+    
+    private void HandlePlayerSelection(string name, int age)
+    {
         // Check if player exists using PlayerRanking system
         if (PlayerRanking.Instance.PlayerExists(name, age))
         {
@@ -97,16 +154,45 @@ public class PlayerMenuController : MonoBehaviour
 
         errorText.text = "No matching player found.";
     }
+    
+    private void HandleOpponentSelection(string name, int age)
+    {
+        // Check if opponent exists using PlayerRanking system
+        if (PlayerRanking.Instance.PlayerExists(name, age))
+        {
+            // Store opponent info for use in game
+            PlayerPrefs.SetString("OpponentName", name);
+            PlayerPrefs.SetInt("OpponentAge", age);
+            PlayerPrefs.Save();
+            
+            // Clear multiplayer mode flag and go to timer menu
+            PlayerPrefs.DeleteKey("MultiplayerMode");
+            SceneManager.LoadScene("TimerMenu");
+            return;
+        }
+
+        errorText.text = "No matching opponent found.";
+    }
 
     public void OnBackToSelection()
     {
-        inputPanel.SetActive(false);
-        selectionPanel.SetActive(true);
-        errorText.text = "";
-        nameInput.text = "";
-        ageInput.text = "";
+        if (isMultiplayerOpponentSelection)
+        {
+            // In multiplayer mode, go back to main menu
+            PlayerPrefs.DeleteKey("MultiplayerMode");
+            SceneManager.LoadScene("MainMenu");
+        }
+        else
+        {
+            // Normal mode, go back to selection panel
+            inputPanel.SetActive(false);
+            selectionPanel.SetActive(true);
+            errorText.text = "";
+            nameInput.text = "";
+            ageInput.text = "";
 
-        saveButton.SetActive(false);
-        playButton.SetActive(false);
+            saveButton.SetActive(false);
+            playButton.SetActive(false);
+        }
     }
 }
