@@ -1,49 +1,77 @@
+using System;
 using System.Collections.Generic;
-using UnityEngine;
 using System.Linq;
-using System.Collections;
+using UnityEngine;
 
 public class ChessAI : MonoBehaviour
 {
-    private const int MAX_DEPTH = 5; // Increased from 4 to 5 for much better play
-    private const int INFINITY = 100000;
-    private const int MAX_SEARCH_TIME = 5000; // 5 seconds max search time
-    private int currentMoveCount = 0; // Track current move count for opening detection
-    private int openingStrategy = 0; // Different opening strategies
-    
-    // Transposition table for caching evaluated positions
-    private Dictionary<ulong, int> transpositionTable = new Dictionary<ulong, int>();
-    private Dictionary<ulong, AIMove> moveTable = new Dictionary<ulong, AIMove>();
-    
-    // Search statistics
-    private int nodesEvaluated = 0;
-    private float searchStartTime = 0f;
-    private bool searchTimeExceeded = false;
-    
-    // Enhanced piece values with positional bonuses
-    private static readonly Dictionary<ChessPieceType, int> pieceValues = new Dictionary<ChessPieceType, int>
+    // === Settings ===
+    private const int MAX_DEPTH          = 6;
+    private const int INFINITY           = 1_000_000;
+    private const int MAX_SEARCH_TIME_MS = 5000;
+    private const int ASPIRATION         = 60;
+    private const int LMR_THRESHOLD      = 6;
+
+    // Pruning margins
+    private const int RAZOR_MARGIN    = 225; // shallow razoring
+    private const int FUTILITY_MARGIN = 90;  // shallow futility
+
+    // Small “anti-draw” bias to discourage aimless shuffling
+    private const int CONTEMPT = 8; // centipawns
+
+    // === Search state ===
+    private int   nodes = 0;
+    private float startMs;
+    private bool  timeUp = false;
+
+    // Variety
+    [SerializeField] private bool smallVariety = true;
+
+    // === Zobrist ===
+    private static ulong[,,] zobrist = new ulong[8,8,12];
+    private static ulong zobristSideToMove;
+    private static bool zobristInit = false;
+    private static System.Random rng64 = new System.Random(20250816);
+
+    // === Transposition table ===
+    private enum TTFlag { Exact, LowerBound, UpperBound }
+    private struct TTEntry
     {
-        { ChessPieceType.Pawn, 100 },
+        public int depth;
+        public int value;
+        public TTFlag flag;
+        public bool sideToMove;
+        public PackedMove best;
+    }
+    private Dictionary<ulong, TTEntry> tt = new Dictionary<ulong, TTEntry>(1<<20);
+
+    // === Move ordering helpers ===
+    private PackedMove[,] killer = new PackedMove[64, 2];
+    private int[,] history = new int[64,64];
+
+    // === Values ===
+    private static readonly Dictionary<ChessPieceType, int> val = new Dictionary<ChessPieceType, int>
+    {
+        { ChessPieceType.Pawn,   100 },
         { ChessPieceType.Knight, 320 },
         { ChessPieceType.Bishop, 330 },
-        { ChessPieceType.Rock, 500 },
-        { ChessPieceType.Queen, 900 },
-        { ChessPieceType.King, 20000 }
+        { ChessPieceType.Rock,   500 }, // rook (enum name kept)
+        { ChessPieceType.Queen,  900 },
+        { ChessPieceType.King,   20000 }
     };
 
-    // Positional piece-square tables for better positional understanding
-    private static readonly int[,] pawnPositionTable = {
-        { 0,  0,  0,  0,  0,  0,  0,  0},
-        {50, 50, 50, 50, 50, 50, 50, 50},
-        {10, 10, 20, 30, 30, 20, 10, 10},
-        { 5,  5, 10, 25, 25, 10,  5,  5},
-        { 0,  0,  0, 20, 20,  0,  0,  0},
-        { 5, -5,-10,  0,  0,-10, -5,  5},
-        { 5, 10, 10,-20,-20, 10, 10,  5},
-        { 0,  0,  0,  0,  0,  0,  0,  0}
+    // === Piece-square tables (MG) ===
+    private static readonly int[,] PST_P = {
+        { 0,0,0,0,0,0,0,0},
+        {50,50,50,50,50,50,50,50},
+        {10,10,20,30,30,20,10,10},
+        { 5, 5,10,25,25,10, 5, 5},
+        { 0, 0, 0,20,20, 0, 0, 0},
+        { 5,-5,-10, 0, 0,-10,-5, 5},
+        { 5,10,10,-20,-20,10,10, 5},
+        { 0, 0, 0, 0, 0, 0, 0, 0}
     };
-
-    private static readonly int[,] knightPositionTable = {
+    private static readonly int[,] PST_N = {
         {-50,-40,-30,-30,-30,-30,-40,-50},
         {-40,-20,  0,  0,  0,  0,-20,-40},
         {-30,  0, 10, 15, 15, 10,  0,-30},
@@ -53,8 +81,7 @@ public class ChessAI : MonoBehaviour
         {-40,-20,  0,  5,  5,  0,-20,-40},
         {-50,-40,-30,-30,-30,-30,-40,-50}
     };
-
-    private static readonly int[,] bishopPositionTable = {
+    private static readonly int[,] PST_B = {
         {-20,-10,-10,-10,-10,-10,-10,-20},
         {-10,  0,  0,  0,  0,  0,  0,-10},
         {-10,  0,  5, 10, 10,  5,  0,-10},
@@ -64,30 +91,27 @@ public class ChessAI : MonoBehaviour
         {-10,  5,  0,  0,  0,  0,  5,-10},
         {-20,-10,-10,-10,-10,-10,-10,-20}
     };
-
-    private static readonly int[,] rookPositionTable = {
-        { 0,  0,  0,  0,  0,  0,  0,  0},
-        { 5, 10, 10, 10, 10, 10, 10,  5},
-        {-5,  0,  0,  0,  0,  0,  0, -5},
-        {-5,  0,  0,  0,  0,  0,  0, -5},
-        {-5,  0,  0,  0,  0,  0,  0, -5},
-        {-5,  0,  0,  0,  0,  0,  0, -5},
-        {-5,  0,  0,  0,  0,  0,  0, -5},
-        { 0,  0,  0,  5,  5,  0,  0,  0}
+    private static readonly int[,] PST_R = {
+        { 0, 0, 0, 0, 0, 0, 0, 0},
+        { 5,10,10,10,10,10,10, 5},
+        {-5, 0, 0, 0, 0, 0, 0,-5},
+        {-5, 0, 0, 0, 0, 0, 0,-5},
+        {-5, 0, 0, 0, 0, 0, 0,-5},
+        {-5, 0, 0, 0, 0, 0, 0,-5},
+        {-5, 0, 0, 0, 0, 0, 0,-5},
+        { 0, 0, 0, 5, 5, 0, 0, 0}
     };
-
-    private static readonly int[,] queenPositionTable = {
-        {-20,-10,-10, -5, -5,-10,-10,-20},
-        {-10,  0,  0,  0,  0,  0,  0,-10},
-        {-10,  0,  5,  5,  5,  5,  0,-10},
-        { -5,  0,  5,  5,  5,  5,  0, -5},
-        {  0,  0,  5,  5,  5,  5,  0, -5},
-        {-10,  5,  5,  5,  5,  5,  0,-10},
-        {-10,  0,  5,  0,  0,  0,  0,-10},
-        {-20,-10,-10, -5, -5,-10,-10,-20}
+    private static readonly int[,] PST_Q = {
+        {-20,-10,-10,-5,-5,-10,-10,-20},
+        {-10,  0,  0, 0, 0,  0,  0,-10},
+        {-10,  0,  5, 5, 5,  5,  0,-10},
+        { -5,  0,  5, 5, 5,  5,  0, -5},
+        {  0,  0,  5, 5, 5,  5,  0, -5},
+        {-10,  5,  5, 5, 5,  5,  0,-10},
+        {-10,  0,  5, 0, 0,  0,  0,-10},
+        {-20,-10,-10,-5,-5,-10,-10,-20}
     };
-
-    private static readonly int[,] kingPositionTable = {
+    private static readonly int[,] PST_K_MG = {
         {-30,-40,-40,-50,-50,-40,-40,-30},
         {-30,-40,-40,-50,-50,-40,-40,-30},
         {-30,-40,-40,-50,-50,-40,-40,-30},
@@ -97,9 +121,7 @@ public class ChessAI : MonoBehaviour
         { 20, 20,  0,  0,  0,  0, 20, 20},
         { 20, 30, 10,  0,  0, 10, 30, 20}
     };
-
-    // Endgame piece-square tables for better endgame play
-    private static readonly int[,] endgameKingPositionTable = {
+    private static readonly int[,] PST_K_EG = {
         {-50,-40,-30,-20,-20,-30,-40,-50},
         {-30,-20,-10,  0,  0,-10,-20,-30},
         {-30,-10, 20, 30, 30, 20,-10,-30},
@@ -110,1174 +132,846 @@ public class ChessAI : MonoBehaviour
         {-50,-30,-30,-30,-30,-30,-30,-50}
     };
 
-    private void Start()
-    {
-        // Randomly choose an opening strategy for this game
-        openingStrategy = Random.Range(0, 4);
-        Debug.Log($"ChessAI using opening strategy: {openingStrategy}");
-    }
+    // cache for tapered eval
+    private int currentPhase = 24;
 
-    public void SetMoveCount(int moveCount)
-    {
-        currentMoveCount = moveCount;
-    }
-
-    public int GetMoveCount()
-    {
-        return currentMoveCount;
-    }
-
-    public void ResetOpeningStrategy()
-    {
-        openingStrategy = Random.Range(0, 4);
-        transpositionTable.Clear();
-        moveTable.Clear();
-    }
-
-    // Generate a hash for the current board position
-    private ulong GenerateBoardHash(ChessPiece[,] board)
-    {
-        ulong hash = 0;
-        for (int x = 0; x < 8; x++)
-        {
-            for (int y = 0; y < 8; y++)
-            {
-                if (board[x, y] != null)
-                {
-                    ChessPiece piece = board[x, y];
-                    int pieceIndex = (int)piece.type + (piece.team * 6);
-                    hash ^= (ulong)(pieceIndex << ((x * 8 + y) * 4));
-                }
-            }
-        }
-        return hash;
-    }
-
+    // === Public AI move (matches your existing use) ===
     public struct AIMove
     {
         public ChessPiece piece;
         public Vector2Int targetPosition;
         public int score;
-        public bool isCapture;
-        public bool isCheck;
-        public bool isCheckEscape;
-        public int movePriority; // Higher priority moves are evaluated first
-
-        public AIMove(ChessPiece piece, Vector2Int targetPosition, int score)
-        {
-            this.piece = piece;
-            this.targetPosition = targetPosition;
-            this.score = score;
-            this.isCapture = false;
-            this.isCheck = false;
-            this.isCheckEscape = false;
-            this.movePriority = 0;
-        }
     }
 
-    public AIMove FindBestMove(ChessPiece[,] board, bool isWhiteTurn, int depth = MAX_DEPTH)
+    // Internal packed move (no Unity refs)
+    private struct PackedMove
     {
-        // Reset search statistics
-        nodesEvaluated = 0;
-        searchStartTime = Time.realtimeSinceStartup * 1000f;
-        searchTimeExceeded = false;
-        
-        // Clear transposition table for new search
-        transpositionTable.Clear();
-        moveTable.Clear();
-        
-        List<AIMove> allMoves = GetAllPossibleMoves(board, isWhiteTurn);
-        
-        if (allMoves.Count == 0)
-        {
-            Debug.LogWarning("Bot could not find a valid move!");
-            return new AIMove(null, Vector2Int.zero, -INFINITY);
-        }
-
-        // Enhanced move analysis
-        for (int i = 0; i < allMoves.Count; i++)
-        {
-            var move = allMoves[i];
-            
-            // Check if this move escapes check
-            if (IsKingInCheck(board, isWhiteTurn))
-            {
-                ChessPiece[,] tempBoard = CloneBoard(board);
-                ChessPiece clonedPiece = tempBoard[move.piece.currentX, move.piece.currentY];
-                tempBoard[move.targetPosition.x, move.targetPosition.y] = clonedPiece;
-                tempBoard[move.piece.currentX, move.piece.currentY] = null;
-                clonedPiece.currentX = move.targetPosition.x;
-                clonedPiece.currentY = move.targetPosition.y;
-                
-                if (!IsKingInCheck(tempBoard, isWhiteTurn))
-                {
-                    move.isCheckEscape = true;
-                }
-            }
-            
-            // Check if this move gives check
-            ChessPiece[,] checkBoard = CloneBoard(board);
-            ChessPiece checkPiece = checkBoard[move.piece.currentX, move.piece.currentY];
-            checkBoard[move.targetPosition.x, move.targetPosition.y] = checkPiece;
-            checkBoard[move.piece.currentX, move.piece.currentY] = null;
-            checkPiece.currentX = move.targetPosition.x;
-            checkPiece.currentY = move.targetPosition.y;
-            
-            if (IsKingInCheck(checkBoard, !isWhiteTurn))
-            {
-                move.isCheck = true;
-            }
-            
-            // Check if this is a capture
-            if (board[move.targetPosition.x, move.targetPosition.y] != null)
-            {
-                move.isCapture = true;
-            }
-            
-            allMoves[i] = move;
-        }
-
-        // Sort moves for better alpha-beta pruning
-        SortMoves(allMoves);
-        
-        // Apply opening move bonuses
-        if (currentMoveCount < 10)
-        {
-            for (int i = 0; i < allMoves.Count; i++)
-            {
-                var move = allMoves[i];
-                move.score += GetOpeningMoveBonus(move.piece, move.targetPosition, isWhiteTurn);
-                allMoves[i] = move;
-            }
-        }
-
-        // Shuffle moves for variety
-        ShuffleMoves(allMoves);
-
-        AIMove bestMove = allMoves[0];
-        int bestScore = isWhiteTurn ? -INFINITY : INFINITY;
-        
-        // Iterative deepening - start with depth 2 and increase
-        int currentDepth = 2;
-        while (currentDepth <= depth && !searchTimeExceeded)
-        {
-            Debug.Log($"Searching at depth {currentDepth}");
-            
-            AIMove currentBestMove = allMoves[0];
-            int currentBestScore = isWhiteTurn ? -INFINITY : INFINITY;
-            
-            foreach (var move in allMoves)
-            {
-                if (searchTimeExceeded) break;
-                
-                ChessPiece[,] tempBoard = CloneBoard(board);
-                ChessPiece clonedPiece = tempBoard[move.piece.currentX, move.piece.currentY];
-                tempBoard[move.targetPosition.x, move.targetPosition.y] = clonedPiece;
-                tempBoard[move.piece.currentX, move.piece.currentY] = null;
-                clonedPiece.currentX = move.targetPosition.x;
-                clonedPiece.currentY = move.targetPosition.y;
-
-                int score = Minimax(tempBoard, currentDepth - 1, -INFINITY, INFINITY, !isWhiteTurn);
-                
-                if (searchTimeExceeded) break;
-                
-                if (isWhiteTurn)
-                {
-                    if (score > currentBestScore)
-                    {
-                        currentBestScore = score;
-                        currentBestMove = move;
-                    }
-                }
-                else
-                {
-                    if (score < currentBestScore)
-                    {
-                        currentBestScore = score;
-                        currentBestMove = move;
-                    }
-                }
-            }
-            
-            if (!searchTimeExceeded)
-            {
-                bestMove = currentBestMove;
-                bestScore = currentBestScore;
-                Debug.Log($"Depth {currentDepth} completed. Best move: {bestMove.piece.type} to ({bestMove.targetPosition.x}, {bestMove.targetPosition.y}) with score {bestScore}");
-            }
-            
-            currentDepth++;
-        }
-        
-        Debug.Log($"Final search completed. Nodes evaluated: {nodesEvaluated}. Best move: {bestMove.piece.type} to ({bestMove.targetPosition.x}, {bestMove.targetPosition.y})");
-        
-        return bestMove;
+        public int fx, fy, tx, ty;
+        public PackedMove(int fx, int fy, int tx, int ty) { this.fx = fx; this.fy = fy; this.tx = tx; this.ty = ty; }
+        public bool Equals(PackedMove o) => fx==o.fx && fy==o.fy && tx==o.tx && ty==o.ty;
+        public bool IsNull => fx == -1;
+        public static PackedMove Null => new PackedMove(-1,-1,-1,-1);
     }
 
-    private void SortMoves(List<AIMove> moves)
+    // === Public entrypoint ===
+    public AIMove FindBestMove(ChessPiece[,] board, bool isWhiteTurn, int maxDepth = MAX_DEPTH)
     {
-        // Calculate move priorities
-        for (int i = 0; i < moves.Count; i++)
+        InitZobrist();
+        nodes   = 0;
+        timeUp  = false;
+        startMs = Time.realtimeSinceStartup * 1000f;
+        tt.Clear();
+        Array.Clear(killer, 0, killer.Length);
+        Array.Clear(history, 0, history.Length);
+
+        var legalRoot = GenerateLegalMoves(board, isWhiteTurn);
+        if (legalRoot.Count == 0)
+            return new AIMove { piece = null, targetPosition = Vector2Int.zero, score = -INFINITY };
+
+        if (smallVariety) UnityEngine.Random.InitState(Environment.TickCount);
+
+        int prevScore = 0;
+        PackedMove bestPacked = legalRoot[0];
+        ulong rootKey = Hash(board, isWhiteTurn);
+
+        // repetition stack (contains position keys along the PV we’re exploring)
+        var rep = new List<ulong>(128);
+        rep.Add(rootKey);
+
+        for (int depth = 1; depth <= Math.Max(2, maxDepth); depth++)
         {
-            var move = moves[i];
-            move.movePriority = 0;
-            
-            // Check escapes have highest priority
-            if (move.isCheckEscape) move.movePriority += 10000;
-            
-            // Checks have high priority
-            if (move.isCheck) move.movePriority += 5000;
-            
-            // Captures have medium priority
-            if (move.isCapture) move.movePriority += 1000;
-            
-            // Add positional bonuses
-            move.movePriority += GetPositionalBonus(move.piece, move.targetPosition.x, move.targetPosition.y);
-            
-            moves[i] = move;
+            int alpha = prevScore - ASPIRATION;
+            int beta  = prevScore + ASPIRATION;
+            int score;
+
+            while (true)
+            {
+                score = PVS(board, depth, alpha, beta, isWhiteTurn ? 1 : -1, 0, rep);
+                if (timeExceeded()) break;
+
+                if (score <= alpha && (alpha > -INFINITY/2)) { alpha = -INFINITY; continue; }
+                if (score >= beta  && (beta  <  INFINITY/2)) { beta  =  INFINITY; continue; }
+                break;
+            }
+            if (timeExceeded()) break;
+
+            prevScore = score;
+
+            if (tt.TryGetValue(rootKey, out var rootHit) && !rootHit.best.IsNull)
+                bestPacked = rootHit.best;
+
+            if ((Time.realtimeSinceStartup * 1000f - startMs) > MAX_SEARCH_TIME_MS * 0.75f)
+                break;
         }
-        
-        // Sort by priority (highest first)
-        moves.Sort((a, b) => b.movePriority.CompareTo(a.movePriority));
+
+        var pieceRef = board[bestPacked.fx, bestPacked.fy];
+        return new AIMove
+        {
+            piece = pieceRef,
+            targetPosition = new Vector2Int(bestPacked.tx, bestPacked.ty),
+            score = prevScore
+        };
     }
 
-    private int Minimax(ChessPiece[,] board, int depth, int alpha, int beta, bool isWhiteTurn)
+    // === Core search with repetition handling ===
+    private int PVS(ChessPiece[,] board, int depth, int alpha, int beta, int color, int ply, List<ulong> rep)
     {
-        nodesEvaluated++;
-        
-        // Check time limit
-        if (Time.realtimeSinceStartup * 1000f - searchStartTime > MAX_SEARCH_TIME)
+        nodes++;
+        if (timeExceeded()) return color * Evaluate(board);
+
+        // Repetition draw: if current key repeats in the path, score = small draw with contempt
+        ulong keyHere = Hash(board, color == 1);
+        int repCount = 0;
+        for (int i = rep.Count - 1; i >= 0 && i >= rep.Count - 128; i--)
+            if (rep[i] == keyHere) { repCount++; if (repCount >= 2) break; } // seen this position before
+        if (repCount >= 2)
+            return (color == 1 ? -CONTEMPT : CONTEMPT); // slight bias to avoid shuffling
+
+        int sideTeam = (color == 1) ? 0 : 1;
+        bool inCheck = IsKingInCheck(board, sideTeam);
+        int staticEval = color * Evaluate(board);
+
+        // Razoring
+        if (!inCheck && depth == 1 && staticEval + RAZOR_MARGIN <= alpha)
+            return Quiescence(board, alpha, beta, color, rep);
+
+        // TT probe
+        PackedMove ttBest = PackedMove.Null;
+        if (tt.TryGetValue(keyHere, out var entry) && entry.sideToMove == (color==1) && entry.depth >= depth)
         {
-            searchTimeExceeded = true;
-            return EvaluateBoard(board, isWhiteTurn);
-        }
-        
-        // Check transposition table
-        ulong boardHash = GenerateBoardHash(board);
-        if (transpositionTable.ContainsKey(boardHash) && depth <= 3)
-        {
-            return transpositionTable[boardHash];
-        }
-        
-        if (depth == 0)
-        {
-            // Use quiescence search for tactical positions
-            return QuiescenceSearch(board, alpha, beta, isWhiteTurn);
+            if (entry.flag == TTFlag.Exact) return entry.value;
+            if (entry.flag == TTFlag.LowerBound) alpha = Math.Max(alpha, entry.value);
+            else if (entry.flag == TTFlag.UpperBound) beta = Math.Min(beta, entry.value);
+            if (alpha >= beta) return entry.value;
+            ttBest = entry.best;
         }
 
-        List<AIMove> moves = GetAllPossibleMoves(board, isWhiteTurn);
-        
+        // Null-move pruning
+        if (depth >= 3 && !inCheck && !IsEndgameish(board))
+        {
+            int R = NullMoveReduction(depth);
+            // null-move flips side to move; push that key
+            ulong nullKey = Hash(board, color != 1);
+            rep.Add(nullKey);
+            int nullScore = -PVS(board, depth - 1 - R, -beta, -beta + 1, -color, ply + 1, rep);
+            rep.RemoveAt(rep.Count - 1);
+
+            if (nullScore >= beta)
+            {
+                StoreTT(keyHere, depth, nullScore, TTFlag.LowerBound, (color==1), PackedMove.Null);
+                return nullScore;
+            }
+        }
+
+        if (depth <= 0)
+            return Quiescence(board, alpha, beta, color, rep);
+
+        var moves = GenerateLegalMoves(board, color == 1);
         if (moves.Count == 0)
-            return EvaluateBoard(board, isWhiteTurn);
+            return color * Evaluate(board);
 
-        // Sort moves for better alpha-beta pruning
-        SortMoves(moves);
+        OrderMoves(board, moves, ttBest, ply);
 
-        if (isWhiteTurn)
+        int bestVal = -INFINITY;
+        PackedMove bestMove = PackedMove.Null;
+        bool first = true;
+        int moveIndex = 0;
+
+        foreach (var m in moves)
         {
-            int maxScore = -INFINITY;
-            for (int i = 0; i < moves.Count; i++)
+            bool isCapture = (board[m.tx, m.ty] != null && board[m.tx, m.ty].team != board[m.fx, m.fy].team);
+
+            // Futility (quiet) at shallow depth
+            if (!isCapture && !inCheck && depth <= 2 && staticEval + FUTILITY_MARGIN * depth <= alpha)
             {
-                if (searchTimeExceeded) break;
-                
-                var move = moves[i];
-                ChessPiece[,] tempBoard = CloneBoard(board);
-                ChessPiece clonedPiece = tempBoard[move.piece.currentX, move.piece.currentY];
-                tempBoard[move.targetPosition.x, move.targetPosition.y] = clonedPiece;
-                tempBoard[move.piece.currentX, move.piece.currentY] = null;
-                clonedPiece.currentX = move.targetPosition.x;
-                clonedPiece.currentY = move.targetPosition.y;
-
-                int score = Minimax(tempBoard, depth - 1, alpha, beta, false);
-
-                maxScore = Mathf.Max(maxScore, score);
-                alpha = Mathf.Max(alpha, score);
-                if (alpha >= beta)
-                    break;
+                moveIndex++;
+                continue;
             }
-            
-            // Store in transposition table
-            if (!searchTimeExceeded)
-                transpositionTable[boardHash] = maxScore;
-                
-            return maxScore;
-        }
-        else
-        {
-            int minScore = INFINITY;
-            for (int i = 0; i < moves.Count; i++)
+
+            var next = Apply(board, m);
+            int newDepth = depth - 1;
+
+            // Check extension
+            bool givesCheck = GivesCheck(next, (color == 1) ? 0 : 1);
+            if (givesCheck && newDepth < depth) newDepth++;
+
+            // LMR
+            if (!isCapture && !givesCheck && depth >= 3 && moveIndex >= LMR_THRESHOLD)
+                newDepth = Math.Max(0, newDepth - 1);
+
+            // Push child key for repetition tracking
+            ulong childKey = Hash(next, color != 1);
+            rep.Add(childKey);
+
+            int score;
+            if (first)
             {
-                if (searchTimeExceeded) break;
-                
-                var move = moves[i];
-                ChessPiece[,] tempBoard = CloneBoard(board);
-                ChessPiece clonedPiece = tempBoard[move.piece.currentX, move.piece.currentY];
-                tempBoard[move.targetPosition.x, move.targetPosition.y] = clonedPiece;
-                tempBoard[move.piece.currentX, move.piece.currentY] = null;
-                clonedPiece.currentX = move.targetPosition.x;
-                clonedPiece.currentY = move.targetPosition.y;
-
-                int score = Minimax(tempBoard, depth - 1, alpha, beta, true);
-
-                minScore = Mathf.Min(minScore, score);
-                beta = Mathf.Min(beta, score);
-                if (alpha >= beta)
-                    break;
-            }
-            
-            // Store in transposition table
-            if (!searchTimeExceeded)
-                transpositionTable[boardHash] = minScore;
-                
-            return minScore;
-        }
-    }
-
-    // Quiescence search to handle tactical sequences
-    private int QuiescenceSearch(ChessPiece[,] board, int alpha, int beta, bool isWhiteTurn)
-    {
-        int standPat = EvaluateBoard(board, isWhiteTurn);
-        
-        if (isWhiteTurn)
-        {
-            if (standPat >= beta) return beta;
-            alpha = Mathf.Max(alpha, standPat);
-        }
-        else
-        {
-            if (standPat <= alpha) return alpha;
-            beta = Mathf.Min(beta, standPat);
-        }
-        
-        // Only look at captures in quiescence search
-        List<AIMove> captures = GetAllPossibleMoves(board, isWhiteTurn).Where(m => m.isCapture).ToList();
-        
-        if (captures.Count == 0) return standPat;
-        
-        // Sort captures by MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
-        captures.Sort((a, b) => {
-            int aValue = pieceValues.ContainsKey(a.piece.type) ? pieceValues[a.piece.type] : 0;
-            int bValue = pieceValues.ContainsKey(b.piece.type) ? pieceValues[b.piece.type] : 0;
-            return bValue.CompareTo(aValue);
-        });
-        
-        foreach (var capture in captures)
-        {
-            ChessPiece[,] tempBoard = CloneBoard(board);
-            ChessPiece clonedPiece = tempBoard[capture.piece.currentX, capture.piece.currentY];
-            tempBoard[capture.targetPosition.x, capture.targetPosition.y] = clonedPiece;
-            tempBoard[capture.piece.currentX, capture.piece.currentY] = null;
-            clonedPiece.currentX = capture.targetPosition.x;
-            clonedPiece.currentY = capture.targetPosition.y;
-
-            int score = QuiescenceSearch(tempBoard, alpha, beta, !isWhiteTurn);
-            
-            if (isWhiteTurn)
-            {
-                alpha = Mathf.Max(alpha, score);
-                if (alpha >= beta) break;
+                score = -PVS(next, newDepth, -beta, -alpha, -color, ply + 1, rep);
+                first = false;
             }
             else
             {
-                beta = Mathf.Min(beta, score);
-                if (alpha >= beta) break;
+                score = -PVS(next, newDepth, -alpha - 1, -alpha, -color, ply + 1, rep);
+                if (score > alpha && score < beta)
+                    score = -PVS(next, newDepth, -beta, -alpha, -color, ply + 1, rep);
             }
+
+            rep.RemoveAt(rep.Count - 1);
+
+            if (score > bestVal) { bestVal = score; bestMove = m; }
+            if (score > alpha)
+            {
+                alpha = score;
+                if (!isCapture)
+                {
+                    if (!killer[ply,0].Equals(m)) { killer[ply,1] = killer[ply,0]; killer[ply,0] = m; }
+                    int from = m.fx*8 + m.fy, to = m.tx*8 + m.ty;
+                    history[from, to] += depth * depth;
+                }
+            }
+            if (alpha >= beta)
+            {
+                if (!isCapture)
+                {
+                    if (!killer[ply,0].Equals(m)) { killer[ply,1] = killer[ply,0]; killer[ply,0] = m; }
+                    int from = m.fx*8 + m.fy, to = m.tx*8 + m.ty;
+                    history[from, to] += depth * depth;
+                }
+                StoreTT(keyHere, depth, bestVal, TTFlag.LowerBound, (color==1), bestMove);
+                return bestVal;
+            }
+            moveIndex++;
         }
-        
-        return isWhiteTurn ? alpha : beta;
+
+        var flag = (bestVal <= alpha) ? TTFlag.UpperBound : TTFlag.Exact;
+        StoreTT(keyHere, depth, bestVal, flag, (color==1), bestMove);
+        return bestVal;
     }
 
-    private List<AIMove> GetAllPossibleMoves(ChessPiece[,] board, bool isWhiteTurn)
+    private int Quiescence(ChessPiece[,] board, int alpha, int beta, int color, List<ulong> rep)
     {
-        List<AIMove> moves = new List<AIMove>();
-        int targetTeam = isWhiteTurn ? 0 : 1;
-        
-        Debug.Log($"GetAllPossibleMoves: Looking for moves for team {targetTeam} ({(isWhiteTurn ? "White" : "Black")})");
-        
-        for (int x = 0; x < 8; x++)
+        if (timeExceeded()) return color * Evaluate(board);
+
+        // repetition check in quiescence too
+        ulong keyHere = Hash(board, color == 1);
+        if (rep.Contains(keyHere))
+            return (color == 1 ? -CONTEMPT : CONTEMPT);
+
+        int standPat = color * Evaluate(board);
+        if (standPat >= beta) return beta;
+        if (alpha < standPat) alpha = standPat;
+
+        var caps = GenerateCaptures(board, color == 1);
+        OrderCapturesMVVLVA(board, caps);
+
+        foreach (var m in caps)
         {
-            for (int y = 0; y < 8; y++)
-            {
-                if (board[x, y] != null)
-                {
-                    ChessPiece piece = board[x, y];
-                    if (piece.team == targetTeam)
-                    {
-                        List<Vector2Int> availableMoves = piece.GetAvailableMoves(ref board, 8, 8);
-                        Debug.Log($"Piece {piece.type} at ({x},{y}) has {availableMoves.Count} available moves");
-                        
-                        foreach (Vector2Int move in availableMoves)
-                        {
-                            // Check if this move doesn't put own king in check
-                            if (!WouldMovePutKingInCheck(board, piece, move))
-                            {
-                                moves.Add(new AIMove(piece, move, 0));
-                            }
-                            else
-                            {
-                                Debug.Log($"Move ({move.x},{move.y}) for {piece.type} at ({x},{y}) would put king in check");
-                            }
-                        }
-                    }
-                }
-            }
+            if (IsClearlyLosingCapture(board, m)) continue;
+
+            var next = Apply(board, m);
+            ulong ck = Hash(next, color != 1);
+            rep.Add(ck);
+            int score = -Quiescence(next, -beta, -alpha, -color, rep);
+            rep.RemoveAt(rep.Count - 1);
+
+            if (score >= beta) return beta;
+            if (score > alpha) alpha = score;
         }
-        
-        Debug.Log($"GetAllPossibleMoves: Found {moves.Count} legal moves for team {targetTeam}");
-        return moves;
+        return alpha;
     }
 
-    private bool WouldMovePutKingInCheck(ChessPiece[,] board, ChessPiece piece, Vector2Int targetPosition)
+    // === Robust attack detection (fixes king "suicide") ===
+    private bool IsKingInCheck(ChessPiece[,] board, int teamOfKing)
     {
-        // Create temporary board
-        ChessPiece[,] tempBoard = CloneBoard(board);
-        
-        // Find the cloned piece in the temp board
-        ChessPiece clonedPiece = tempBoard[piece.currentX, piece.currentY];
-        
-        // Make the move
-        tempBoard[targetPosition.x, targetPosition.y] = clonedPiece;
-        tempBoard[piece.currentX, piece.currentY] = null;
-        
-        // Update cloned piece position
-        clonedPiece.currentX = targetPosition.x;
-        clonedPiece.currentY = targetPosition.y;
-        
-        // Find own king
-        ChessPiece ownKing = null;
-        for (int x = 0; x < 8; x++)
+        // locate king
+        for (int x=0;x<8;x++)
+        for (int y=0;y<8;y++)
         {
-            for (int y = 0; y < 8; y++)
-            {
-                if (tempBoard[x, y] != null && tempBoard[x, y].type == ChessPieceType.King && tempBoard[x, y].team == piece.team)
-                {
-                    ownKing = tempBoard[x, y];
-                    break;
-                }
-            }
-            if (ownKing != null) break;
+            var p = board[x,y];
+            if (p != null && p.type == ChessPieceType.King && p.team == teamOfKing)
+                return SquareAttackedByTeam(board, x, y, teamOfKing ^ 1);
         }
-        
-        if (ownKing == null) return false;
-        
-        // Check if any enemy piece can attack the king
-        for (int x = 0; x < 8; x++)
+        return false; // should not happen in a legal game
+    }
+
+    private bool SquareAttackedByTeam(ChessPiece[,] board, int x, int y, int byTeam)
+    {
+        // Pawns: white(team 0) attacks +1, black(team 1) attacks -1
+        int dir = (byTeam == 0) ? 1 : -1;
+        if (Inside(x-1, y+dir) && board[x-1, y+dir] != null && board[x-1, y+dir].team == byTeam && board[x-1, y+dir].type == ChessPieceType.Pawn) return true;
+        if (Inside(x+1, y+dir) && board[x+1, y+dir] != null && board[x+1, y+dir].team == byTeam && board[x+1, y+dir].type == ChessPieceType.Pawn) return true;
+
+        // Knights
+        int[,] K = {{1,2},{2,1},{-1,2},{-2,1},{1,-2},{2,-1},{-1,-2},{-2,-1}};
+        for (int i=0;i<8;i++)
         {
-            for (int y = 0; y < 8; y++)
+            int nx = x + K[i,0], ny = y + K[i,1];
+            if (Inside(nx,ny))
             {
-                if (tempBoard[x, y] != null && tempBoard[x, y].team != piece.team)
-                {
-                    List<Vector2Int> enemyMoves = tempBoard[x, y].GetAvailableMoves(ref tempBoard, 8, 8);
-                    if (enemyMoves.Contains(new Vector2Int(ownKing.currentX, ownKing.currentY)))
-                    {
-                        return true; // King would be in check
-                    }
-                }
+                var p = board[nx,ny];
+                if (p != null && p.team == byTeam && p.type == ChessPieceType.Knight) return true;
             }
         }
-        
+
+        // King adjacent
+        for (int dx=-1; dx<=1; dx++)
+        for (int dy=-1; dy<=1; dy++)
+        {
+            if (dx==0 && dy==0) continue;
+            int nx = x+dx, ny = y+dy;
+            if (Inside(nx,ny))
+            {
+                var p = board[nx,ny];
+                if (p != null && p.team == byTeam && p.type == ChessPieceType.King) return true;
+            }
+        }
+
+        // Bishop/Queen diagonals
+        int[,] diag = {{1,1},{1,-1},{-1,1},{-1,-1}};
+        for (int d=0; d<4; d++)
+        {
+            int dx = diag[d,0], dy = diag[d,1];
+            int nx = x+dx, ny = y+dy;
+            while (Inside(nx,ny))
+            {
+                var p = board[nx,ny];
+                if (p != null)
+                {
+                    if (p.team == byTeam && (p.type == ChessPieceType.Bishop || p.type == ChessPieceType.Queen)) return true;
+                    break; // blocked
+                }
+                nx += dx; ny += dy;
+            }
+        }
+
+        // Rook/Queen orthogonals
+        int[,] ortho = {{1,0},{-1,0},{0,1},{0,-1}};
+        for (int d=0; d<4; d++)
+        {
+            int dx = ortho[d,0], dy = ortho[d,1];
+            int nx = x+dx, ny = y+dy;
+            while (Inside(nx,ny))
+            {
+                var p = board[nx,ny];
+                if (p != null)
+                {
+                    if (p.team == byTeam && (p.type == ChessPieceType.Rock || p.type == ChessPieceType.Queen)) return true;
+                    break; // blocked
+                }
+                nx += dx; ny += dy;
+            }
+        }
+
         return false;
     }
 
-    private ChessPiece[,] CloneBoard(ChessPiece[,] original)
+    private bool Inside(int x, int y) => x>=0 && x<8 && y>=0 && y<8;
+
+    private bool GivesCheck(ChessPiece[,] board, int defenderTeam)
     {
-        ChessPiece[,] clone = new ChessPiece[8, 8];
-        for (int x = 0; x < 8; x++)
+        // If defender king square is attacked by the mover after the move
+        for (int x=0;x<8;x++)
+        for (int y=0;y<8;y++)
         {
-            for (int y = 0; y < 8; y++)
+            var p = board[x,y];
+            if (p != null && p.type == ChessPieceType.King && p.team == defenderTeam)
+                return SquareAttackedByTeam(board, p.currentX, p.currentY, defenderTeam ^ 1);
+        }
+        return false;
+    }
+
+    // === Move gen & helpers ===
+    private List<PackedMove> GenerateLegalMoves(ChessPiece[,] board, bool isWhiteTurn)
+    {
+        int side = isWhiteTurn ? 0 : 1;
+        var list = new List<PackedMove>(64);
+
+        for (int x=0;x<8;x++)
+        for (int y=0;y<8;y++)
+        {
+            var p = board[x,y];
+            if (p == null || p.team != side) continue;
+
+            var avail = p.GetAvailableMoves(ref board, 8, 8);
+            foreach (var mv in avail)
             {
-                if (original[x, y] != null)
+                if (WouldLeaveKingInCheck(board, p, mv)) continue;
+                list.Add(new PackedMove(x, y, mv.x, mv.y));
+            }
+        }
+        return list;
+    }
+
+    private List<PackedMove> GenerateCaptures(ChessPiece[,] board, bool isWhiteTurn)
+    {
+        int side = isWhiteTurn ? 0 : 1;
+        var list = new List<PackedMove>(64);
+
+        for (int x=0;x<8;x++)
+        for (int y=0;y<8;y++)
+        {
+            var p = board[x,y];
+            if (p == null || p.team != side) continue;
+
+            var avail = p.GetAvailableMoves(ref board, 8, 8);
+            foreach (var mv in avail)
+            {
+                var t = board[mv.x, mv.y];
+                if (t != null && t.team != side)
                 {
-                    // Create a new instance of the piece with the same properties
-                    ChessPiece originalPiece = original[x, y];
-                    ChessPiece clonedPiece = CreatePieceCopy(originalPiece);
-                    clone[x, y] = clonedPiece;
-                }
-                else
-                {
-                    clone[x, y] = null;
+                    if (WouldLeaveKingInCheck(board, p, mv)) continue;
+                    list.Add(new PackedMove(x, y, mv.x, mv.y));
                 }
             }
         }
+        return list;
+    }
+
+    private void OrderMoves(ChessPiece[,] board, List<PackedMove> moves, PackedMove ttMove, int ply)
+    {
+        moves.Sort((a,b) =>
+        {
+            int sa = ScoreMove(board, a, ttMove, ply);
+            int sb = ScoreMove(board, b, ttMove, ply);
+            return sb.CompareTo(sa);
+        });
+    }
+
+    private int ScoreMove(ChessPiece[,] board, PackedMove m, PackedMove ttMove, int ply)
+    {
+        int score = 0;
+
+        if (!ttMove.IsNull && ttMove.Equals(m))
+            score += 1_000_000;
+
+        var to   = board[m.tx, m.ty];
+        var from = board[m.fx, m.fy];
+
+        if (to != null && to.team != from.team)
+        {
+            int victim = val[to.type];
+            int att    = val[from.type];
+            score += 500_000 + (victim * 10 - att);
+        }
+
+        if (killer[ply,0].Equals(m)) score += 300_000;
+        else if (killer[ply,1].Equals(m)) score += 290_000;
+
+        int fromSq = m.fx*8 + m.fy, toSq = m.tx*8 + m.ty;
+        score += history[fromSq, toSq];
+
+        // small PST bump for ordering only (uses last currentPhase; it's fine)
+        score += PositionalBonus(from, m.tx, m.ty) - PositionalBonus(from, m.fx, m.fy);
+
+        return score;
+    }
+
+    private void OrderCapturesMVVLVA(ChessPiece[,] board, List<PackedMove> caps)
+    {
+        caps.Sort((a,b) =>
+        {
+            var av = board[a.tx, a.ty] != null ? val[board[a.tx,a.ty].type] : 0;
+            var bv = board[b.tx, b.ty] != null ? val[board[b.tx,b.ty].type] : 0;
+            var aa = val[board[a.fx,a.fy].type];
+            var ba = val[board[b.fx,b.fy].type];
+            int sa = av*10 - aa;
+            int sb = bv*10 - ba;
+            return sb.CompareTo(sa);
+        });
+    }
+
+    private ChessPiece[,] Apply(ChessPiece[,] board, PackedMove m)
+    {
+        var clone = CloneBoard(board);
+        var pc = clone[m.fx, m.fy];
+        clone[m.tx, m.ty] = pc;
+        clone[m.fx, m.fy] = null;
+        pc.currentX = m.tx; pc.currentY = m.ty;
         return clone;
     }
 
-    private ChessPiece CreatePieceCopy(ChessPiece original)
+    private bool WouldLeaveKingInCheck(ChessPiece[,] board, ChessPiece piece, Vector2Int target)
     {
-        // Create a new piece of the same type
-        ChessPiece copy = null;
-        
-        switch (original.type)
-        {
-            case ChessPieceType.Pawn:
-                copy = new Pawn();
-                break;
-            case ChessPieceType.Knight:
-                copy = new Knight();
-                break;
-            case ChessPieceType.Bishop:
-                copy = new Bishop();
-                break;
-            case ChessPieceType.Rock:
-                copy = new Rock();
-                break;
-            case ChessPieceType.Queen:
-                copy = new Queen();
-                break;
-            case ChessPieceType.King:
-                copy = new King();
-                break;
-        }
-        
-        if (copy != null)
-        {
-            // Copy the essential properties
-            copy.type = original.type;
-            copy.team = original.team;
-            copy.currentX = original.currentX;
-            copy.currentY = original.currentY;
-        }
-        
-        return copy;
+        var clone = CloneBoard(board);
+        var p = clone[piece.currentX, piece.currentY];
+        clone[target.x, target.y] = p;
+        clone[piece.currentX, piece.currentY] = null;
+        p.currentX = target.x; p.currentY = target.y;
+        return IsKingInCheck(clone, piece.team);
     }
 
-    private int EvaluateBoard(ChessPiece[,] board, bool isWhiteTurn)
+    private ChessPiece[,] CloneBoard(ChessPiece[,] src)
     {
+        var dst = new ChessPiece[8,8];
+        for (int x=0;x<8;x++)
+        for (int y=0;y<8;y++)
+        {
+            var p = src[x,y];
+            dst[x,y] = (p == null) ? null : CopyPiece(p);
+        }
+        return dst;
+    }
+
+    private ChessPiece CopyPiece(ChessPiece o)
+    {
+        ChessPiece c = null;
+        switch (o.type)
+        {
+            case ChessPieceType.Pawn:   c = new Pawn();   break;
+            case ChessPieceType.Knight: c = new Knight(); break;
+            case ChessPieceType.Bishop: c = new Bishop(); break;
+            case ChessPieceType.Rock:   c = new Rock();   break;
+            case ChessPieceType.Queen:  c = new Queen();  break;
+            case ChessPieceType.King:   c = new King();   break;
+        }
+        c.type = o.type;
+        c.team = o.team;
+        c.currentX = o.currentX;
+        c.currentY = o.currentY;
+        // TODO: copy extra rule flags if your engine uses them (hasMoved, enPassant, castling rights, etc.)
+        return c;
+    }
+
+    // === Eval ===
+    private int Evaluate(ChessPiece[,] board)
+    {
+        currentPhase = ComputePhase(board);
+
         int score = 0;
-        
-        // First, check if the current player's king is in check
-        bool isKingInCheck = IsKingInCheck(board, isWhiteTurn);
-        
-        // If king is in check, this is a critical situation
-        if (isKingInCheck)
+        for (int x=0;x<8;x++)
+        for (int y=0;y<8;y++)
         {
-            // Check if there are any legal moves to get out of check
-            List<AIMove> legalMoves = GetAllPossibleMoves(board, isWhiteTurn);
-            
-            if (legalMoves.Count == 0)
-            {
-                // Checkmate - this is the worst possible position
-                return isWhiteTurn ? -INFINITY : INFINITY;
-            }
-            else
-            {
-                // King is in check but there are legal moves - this is very bad but not hopeless
-                score += isWhiteTurn ? -5000 : 5000;
-            }
+            var p = board[x,y];
+            if (p == null) continue;
+            int baseV = val[p.type];
+            int pst   = PositionalBonus(p, x, y);
+            int s = baseV + pst;
+            score += (p.team == 0) ? s : -s;
         }
-        
-        // Enhanced evaluation with positional understanding
-        for (int x = 0; x < 8; x++)
-        {
-            for (int y = 0; y < 8; y++)
-            {
-                if (board[x, y] != null)
-                {
-                    ChessPiece piece = board[x, y];
-                    int pieceValue = pieceValues.ContainsKey(piece.type) ? pieceValues[piece.type] : 0;
-                    int positionalBonus = GetPositionalBonus(piece, x, y);
-                    int totalValue = pieceValue + positionalBonus;
-                    
-                    if (piece.team == 0) // White
-                        score += totalValue;
-                    else // Black
-                        score -= totalValue;
-                }
-            }
-        }
-        
-        // Add king safety evaluation
-        score += EvaluateKingSafety(board, isWhiteTurn);
-        
-        // Add pawn structure evaluation
-        score += EvaluatePawnStructure(board, isWhiteTurn);
-        
-        // Add piece mobility evaluation
-        score += EvaluateMobility(board, isWhiteTurn);
-        
-        // Add center control evaluation
-        score += EvaluateCenterControl(board, isWhiteTurn);
-        
-        // Add passed pawn evaluation
-        score += EvaluatePassedPawns(board, isWhiteTurn);
-        
-        // Add threat detection
-        score += EvaluateThreats(board, isWhiteTurn);
-        
-        // Add material imbalance adjustments
-        score += EvaluateMaterialImbalance(board, isWhiteTurn);
-        
-        // Add endgame-specific evaluation
-        score += EvaluateEndgame(board, isWhiteTurn);
-        
+
+        score += Mobility(board);
+        score += CenterControl(board);
+        score += PawnStructure(board);
+        score += PassedPawns(board);
+        score += KingSafety(board);
+        score += BishopPair(board);
+        score += RookOpenFiles(board);
+
+        score += 10; // small tempo
         return score;
     }
 
-    private int GetPositionalBonus(ChessPiece piece, int x, int y)
+    private int ComputePhase(ChessPiece[,] board)
     {
-        int bonus = 0;
-        int tableY = piece.team == 0 ? y : 7 - y; // Flip table for black pieces
-        
-        switch (piece.type)
+        int phase = 0; // max 24
+        for (int x=0;x<8;x++)
+        for (int y=0;y<8;y++)
         {
-            case ChessPieceType.Pawn:
-                bonus = pawnPositionTable[tableY, x];
-                break;
-            case ChessPieceType.Knight:
-                bonus = knightPositionTable[tableY, x];
-                break;
-            case ChessPieceType.Bishop:
-                bonus = bishopPositionTable[tableY, x];
-                break;
-            case ChessPieceType.Rock:
-                bonus = rookPositionTable[tableY, x];
-                break;
-            case ChessPieceType.Queen:
-                bonus = queenPositionTable[tableY, x];
-                break;
-            case ChessPieceType.King:
-                bonus = kingPositionTable[tableY, x];
-                break;
+            var p = board[x,y];
+            if (p == null) continue;
+            switch (p.type)
+            {
+                case ChessPieceType.Knight: phase += 1; break;
+                case ChessPieceType.Bishop: phase += 1; break;
+                case ChessPieceType.Rock:   phase += 2; break;
+                case ChessPieceType.Queen:  phase += 4; break;
+            }
         }
-        
-        return bonus;
+        return Mathf.Clamp(phase, 0, 24);
     }
 
-    private int EvaluatePawnStructure(ChessPiece[,] board, bool isWhiteTurn)
+    private int PositionalBonus(ChessPiece p, int x, int y)
     {
-        int score = 0;
-        int targetTeam = isWhiteTurn ? 0 : 1;
-        
-        // Count doubled pawns (penalty)
-        for (int x = 0; x < 8; x++)
+        int ty = (p.team == 0) ? y : 7 - y;
+        if (p.type == ChessPieceType.King)
         {
-            int pawnCount = 0;
-            for (int y = 0; y < 8; y++)
-            {
-                if (board[x, y] != null && board[x, y].type == ChessPieceType.Pawn && board[x, y].team == targetTeam)
-                {
-                    pawnCount++;
-                }
-            }
-            if (pawnCount > 1)
-            {
-                score -= (pawnCount - 1) * 20; // Penalty for doubled pawns
-            }
+            int mg = PST_K_MG[ty, x];
+            int eg = PST_K_EG[ty, x];
+            return (mg * currentPhase + eg * (24 - currentPhase)) / 24;
         }
-        
-        // Bonus for isolated pawns (penalty)
-        for (int x = 0; x < 8; x++)
+        switch (p.type)
         {
-            for (int y = 0; y < 8; y++)
-            {
-                if (board[x, y] != null && board[x, y].type == ChessPieceType.Pawn && board[x, y].team == targetTeam)
-                {
-                    bool hasAdjacentPawn = false;
-                    for (int dx = -1; dx <= 1; dx++)
-                    {
-                        int checkX = x + dx;
-                        if (checkX >= 0 && checkX < 8 && checkX != x)
-                        {
-                            for (int checkY = 0; checkY < 8; checkY++)
-                            {
-                                if (board[checkX, checkY] != null && board[checkX, checkY].type == ChessPieceType.Pawn && board[checkX, checkY].team == targetTeam)
-                                {
-                                    hasAdjacentPawn = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if (!hasAdjacentPawn)
-                    {
-                        score -= 30; // Penalty for isolated pawn
-                    }
-                }
-            }
-        }
-        
-        return score;
-    }
-
-    private int EvaluateMobility(ChessPiece[,] board, bool isWhiteTurn)
-    {
-        int score = 0;
-        int targetTeam = isWhiteTurn ? 0 : 1;
-        
-        for (int x = 0; x < 8; x++)
-        {
-            for (int y = 0; y < 8; y++)
-            {
-                if (board[x, y] != null && board[x, y].team == targetTeam)
-                {
-                    List<Vector2Int> moves = board[x, y].GetAvailableMoves(ref board, 8, 8);
-                    score += moves.Count * 5; // Bonus for each legal move
-                }
-            }
-        }
-        
-        return score;
-    }
-
-    private int EvaluateCenterControl(ChessPiece[,] board, bool isWhiteTurn)
-    {
-        int score = 0;
-        int targetTeam = isWhiteTurn ? 0 : 1;
-        
-        // Bonus for controlling center squares
-        for (int x = 3; x <= 4; x++)
-        {
-            for (int y = 3; y <= 4; y++)
-            {
-                if (board[x, y] != null && board[x, y].team == targetTeam)
-                {
-                    score += 20; // Bonus for center control
-                }
-            }
-        }
-        
-        return score;
-    }
-
-    private bool IsKingInCheck(ChessPiece[,] board, bool isWhiteTurn)
-    {
-        // Find the king - when isWhiteTurn is true, we're looking for the white king (team 0)
-        // when isWhiteTurn is false, we're looking for the black king (team 1)
-        ChessPiece king = null;
-        int targetTeam = isWhiteTurn ? 0 : 1;
-        
-        for (int x = 0; x < 8; x++)
-        {
-            for (int y = 0; y < 8; y++)
-            {
-                if (board[x, y] != null && board[x, y].type == ChessPieceType.King && board[x, y].team == targetTeam)
-                {
-                    king = board[x, y];
-                    break;
-                }
-            }
-            if (king != null) break;
-        }
-        
-        if (king == null) 
-        {
-            Debug.LogWarning($"IsKingInCheck: Could not find king for team {targetTeam} (isWhiteTurn: {isWhiteTurn})");
-            return false;
-        }
-        
-        // Check if any enemy piece can attack the king
-        for (int x = 0; x < 8; x++)
-        {
-            for (int y = 0; y < 8; y++)
-            {
-                if (board[x, y] != null && board[x, y].team != king.team)
-                {
-                    List<Vector2Int> enemyMoves = board[x, y].GetAvailableMoves(ref board, 8, 8);
-                    if (enemyMoves.Contains(new Vector2Int(king.currentX, king.currentY)))
-                    {
-                        Debug.Log($"King in check! Enemy piece at ({x},{y}) can attack king at ({king.currentX},{king.currentY})");
-                        return true; // King is in check
-                    }
-                }
-            }
-        }
-        
-        return false;
-    }
-
-    private int EvaluateKingSafety(ChessPiece[,] board, bool isWhiteTurn)
-    {
-        int score = 0;
-        
-        // Find the king - when isWhiteTurn is true, we're looking for the white king (team 0)
-        // when isWhiteTurn is false, we're looking for the black king (team 1)
-        ChessPiece king = null;
-        int targetTeam = isWhiteTurn ? 0 : 1;
-        
-        for (int x = 0; x < 8; x++)
-        {
-            for (int y = 0; y < 8; y++)
-            {
-                if (board[x, y] != null && board[x, y].type == ChessPieceType.King && board[x, y].team == targetTeam)
-                {
-                    king = board[x, y];
-                    break;
-                }
-            }
-            if (king != null) break;
-        }
-        
-        if (king == null) return 0;
-        
-        // Count how many enemy pieces are attacking squares around the king
-        int attackingPieces = 0;
-        int defendingPieces = 0;
-        
-        // Check the 8 squares around the king
-        for (int dx = -1; dx <= 1; dx++)
-        {
-            for (int dy = -1; dy <= 1; dy++)
-            {
-                if (dx == 0 && dy == 0) continue; // Skip the king's own square
-                
-                int checkX = king.currentX + dx;
-                int checkY = king.currentY + dy;
-                
-                if (checkX >= 0 && checkX < 8 && checkY >= 0 && checkY < 8)
-                {
-                    // Count enemy pieces that can attack this square
-                    for (int x = 0; x < 8; x++)
-                    {
-                        for (int y = 0; y < 8; y++)
-                        {
-                            if (board[x, y] != null && board[x, y].team != king.team)
-                            {
-                                List<Vector2Int> enemyMoves = board[x, y].GetAvailableMoves(ref board, 8, 8);
-                                if (enemyMoves.Contains(new Vector2Int(checkX, checkY)))
-                                {
-                                    attackingPieces++;
-                                }
-                            }
-                            else if (board[x, y] != null && board[x, y].team == king.team)
-                            {
-                                List<Vector2Int> friendlyMoves = board[x, y].GetAvailableMoves(ref board, 8, 8);
-                                if (friendlyMoves.Contains(new Vector2Int(checkX, checkY)))
-                                {
-                                    defendingPieces++;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Penalize positions where the king is under attack
-        score -= attackingPieces * 50;
-        score += defendingPieces * 30;
-        
-        // Bonus for king in the corner (safer in endgame)
-        if (king.currentX <= 1 || king.currentX >= 6)
-        {
-            if (king.currentY <= 1 || king.currentY >= 6)
-            {
-                score += 20;
-            }
-        }
-        
-        return score;
-    }
-
-    private int GetOpeningMoveBonus(ChessPiece piece, Vector2Int targetPosition, bool isWhiteTurn)
-    {
-        switch (openingStrategy)
-        {
-            case 0: return GetStandardOpeningBonus(piece, targetPosition, isWhiteTurn);
-            case 1: return GetAggressiveOpeningBonus(piece, targetPosition, isWhiteTurn);
-            case 2: return GetDefensiveOpeningBonus(piece, targetPosition, isWhiteTurn);
-            case 3: return GetUnconventionalOpeningBonus(piece, targetPosition, isWhiteTurn);
+            case ChessPieceType.Pawn:   return PST_P[ty, x];
+            case ChessPieceType.Knight: return PST_N[ty, x];
+            case ChessPieceType.Bishop: return PST_B[ty, x];
+            case ChessPieceType.Rock:   return PST_R[ty, x];
+            case ChessPieceType.Queen:  return PST_Q[ty, x];
             default: return 0;
         }
     }
 
-    private int GetStandardOpeningBonus(ChessPiece piece, Vector2Int targetPosition, bool isWhiteTurn)
+    private int Mobility(ChessPiece[,] board)
     {
-        int bonus = 0;
-        
-        // Standard opening principles
-        if (piece.type == ChessPieceType.Pawn)
+        int s = 0;
+        for (int x=0;x<8;x++)
+        for (int y=0;y<8;y++)
         {
-            // Encourage pawn development
-            if (isWhiteTurn && targetPosition.y > piece.currentY)
-                bonus += 10;
-            else if (!isWhiteTurn && targetPosition.y < piece.currentY)
-                bonus += 10;
-                
-            // Bonus for center pawn moves
-            if (targetPosition.x >= 3 && targetPosition.x <= 4)
-                bonus += 15;
+            var p = board[x,y];
+            if (p == null) continue;
+            var moves = p.GetAvailableMoves(ref board, 8, 8);
+            int delta = moves.Count * 2;
+            s += (p.team == 0) ? delta : -delta;
         }
-        else if (piece.type == ChessPieceType.Knight || piece.type == ChessPieceType.Bishop)
-        {
-            // Encourage piece development
-            if (isWhiteTurn && targetPosition.y > 1)
-                bonus += 20;
-            else if (!isWhiteTurn && targetPosition.y < 6)
-                bonus += 20;
-        }
-        
-        return bonus;
+        return s;
     }
 
-    private int GetAggressiveOpeningBonus(ChessPiece piece, Vector2Int targetPosition, bool isWhiteTurn)
+    private int CenterControl(ChessPiece[,] board)
     {
-        int bonus = 0;
-        
-        // Aggressive opening - prioritize attacking moves
-        if (piece.type == ChessPieceType.Pawn)
+        int s = 0;
+        for (int x=3;x<=4;x++)
+        for (int y=3;y<=4;y++)
         {
-            // Encourage pawn advances
-            if (isWhiteTurn && targetPosition.y > piece.currentY)
-                bonus += 20;
-            else if (!isWhiteTurn && targetPosition.y < piece.currentY)
-                bonus += 20;
+            var p = board[x,y];
+            if (p == null) continue;
+            s += (p.team == 0) ? 15 : -15;
         }
-        else if (piece.type == ChessPieceType.Knight || piece.type == ChessPieceType.Bishop)
-        {
-            // Encourage attacking piece placement
-            if (isWhiteTurn && targetPosition.y > 2)
-                bonus += 30;
-            else if (!isWhiteTurn && targetPosition.y < 5)
-                bonus += 30;
-        }
-        
-        return bonus;
+        return s;
     }
 
-    private int GetDefensiveOpeningBonus(ChessPiece piece, Vector2Int targetPosition, bool isWhiteTurn)
+    private int PawnStructure(ChessPiece[,] board)
     {
-        int bonus = 0;
-        
-        // Defensive opening - prioritize safety
-        if (piece.type == ChessPieceType.King)
+        int s = 0;
+        // doubled
+        for (int file=0; file<8; file++)
         {
-            // Encourage castling
-            if (targetPosition.x == 6 || targetPosition.x == 2)
-                bonus += 50;
-        }
-        else if (piece.type == ChessPieceType.Pawn)
-        {
-            // Keep pawns connected
-            bonus += 10;
-        }
-        
-        return bonus;
-    }
-
-    private int GetUnconventionalOpeningBonus(ChessPiece piece, Vector2Int targetPosition, bool isWhiteTurn)
-    {
-        int bonus = 0;
-        
-        // Unconventional opening - encourage unusual moves
-        if (piece.type == ChessPieceType.Pawn)
-        {
-            // Encourage flank pawn moves
-            if (targetPosition.x <= 1 || targetPosition.x >= 6)
-                bonus += 25;
-        }
-        else if (piece.type == ChessPieceType.Knight)
-        {
-            // Encourage knight to the edge
-            if (targetPosition.x <= 1 || targetPosition.x >= 6)
-                bonus += 20;
-        }
-        
-        return bonus;
-    }
-
-    private void ShuffleMoves(List<AIMove> moves)
-    {
-        // Fisher-Yates shuffle for move variety
-        for (int i = moves.Count - 1; i > 0; i--)
-        {
-            int j = Random.Range(0, i + 1);
-            AIMove temp = moves[i];
-            moves[i] = moves[j];
-            moves[j] = temp;
-        }
-    }
-
-    // Evaluate passed pawns (pawns that can't be stopped by enemy pawns)
-    private int EvaluatePassedPawns(ChessPiece[,] board, bool isWhiteTurn)
-    {
-        int score = 0;
-        int targetTeam = isWhiteTurn ? 0 : 1;
-        int enemyTeam = isWhiteTurn ? 1 : 0;
-        
-        for (int x = 0; x < 8; x++)
-        {
-            for (int y = 0; y < 8; y++)
+            int w=0, b=0;
+            for (int r=0;r<8;r++)
             {
-                if (board[x, y] != null && board[x, y].type == ChessPieceType.Pawn && board[x, y].team == targetTeam)
+                var p = board[file,r];
+                if (p == null || p.type != ChessPieceType.Pawn) continue;
+                if (p.team==0) w++; else b++;
+            }
+            if (w > 1) s -= (w-1) * 18;
+            if (b > 1) s += (b-1) * 18;
+        }
+        // isolated
+        for (int x=0;x<8;x++)
+        for (int y=0;y<8;y++)
+        {
+            var p = board[x,y];
+            if (p == null || p.type != ChessPieceType.Pawn) continue;
+            bool hasAdj = false;
+            for (int dx=-1; dx<=1; dx+=2)
+            {
+                int fx = x + dx;
+                if (fx < 0 || fx > 7) continue;
+                for (int r=0;r<8;r++)
                 {
-                    bool isPassed = true;
-                    
-                    // Check if there are enemy pawns that can block this pawn
-                    for (int checkX = Mathf.Max(0, x - 1); checkX <= Mathf.Min(7, x + 1); checkX++)
-                    {
-                        if (checkX == x) continue;
-                        
-                        for (int checkY = 0; checkY < 8; checkY++)
-                        {
-                            if (board[checkX, checkY] != null && board[checkX, checkY].type == ChessPieceType.Pawn && board[checkX, checkY].team == enemyTeam)
-                            {
-                                // If enemy pawn is ahead, this is not a passed pawn
-                                if ((isWhiteTurn && checkY > y) || (!isWhiteTurn && checkY < y))
-                                {
-                                    isPassed = false;
-                                    break;
-                                }
-                            }
-                        }
-                        if (!isPassed) break;
-                    }
-                    
-                    if (isPassed)
-                    {
-                        // Bonus for passed pawns, more for advanced ones
-                        int advancement = isWhiteTurn ? y : (7 - y);
-                        score += advancement * 20;
-                    }
+                    var q = board[fx,r];
+                    if (q != null && q.type==ChessPieceType.Pawn && q.team==p.team)
+                    { hasAdj = true; break; }
                 }
             }
+            if (!hasAdj) s += (p.team==0) ? -25 : 25;
         }
-        
-        return score;
+        return s;
     }
 
-    // Evaluate threats (forks, pins, skewers)
-    private int EvaluateThreats(ChessPiece[,] board, bool isWhiteTurn)
+    private int PassedPawns(ChessPiece[,] board)
     {
-        int score = 0;
-        int targetTeam = isWhiteTurn ? 0 : 1;
-        int enemyTeam = isWhiteTurn ? 1 : 0;
-        
-        // Look for pieces that attack multiple valuable targets
-        for (int x = 0; x < 8; x++)
+        int s = 0;
+        for (int x=0;x<8;x++)
+        for (int y=0;y<8;y++)
         {
-            for (int y = 0; y < 8; y++)
+            var p = board[x,y];
+            if (p == null || p.type != ChessPieceType.Pawn) continue;
+            int enemy = p.team ^ 1;
+            bool passed = true;
+            for (int fx = Math.Max(0, x-1); fx <= Math.Min(7, x+1); fx++)
             {
-                if (board[x, y] != null && board[x, y].team == targetTeam)
+                for (int ry=0; ry<8; ry++)
                 {
-                    ChessPiece piece = board[x, y];
-                    List<Vector2Int> attacks = piece.GetAvailableMoves(ref board, 8, 8);
-                    
-                    int valuableTargets = 0;
-                    foreach (var attack in attacks)
-                    {
-                        if (board[attack.x, attack.y] != null && board[attack.x, attack.y].team == enemyTeam)
-                        {
-                            int targetValue = pieceValues.ContainsKey(board[attack.x, attack.y].type) ? pieceValues[board[attack.x, attack.y].type] : 0;
-                            if (targetValue > pieceValues[piece.type])
-                            {
-                                valuableTargets++;
-                            }
-                        }
-                    }
-                    
-                    // Bonus for attacking multiple valuable targets (potential fork)
-                    if (valuableTargets > 1)
-                    {
-                        score += valuableTargets * 50;
-                    }
+                    var q = board[fx, ry];
+                    if (q == null || q.type != ChessPieceType.Pawn || q.team != enemy) continue;
+                    bool ahead = (p.team==0) ? (ry > y) : (ry < y);
+                    if (ahead) { passed = false; break; }
                 }
+                if (!passed) break;
+            }
+            if (passed)
+            {
+                int adv = (p.team==0) ? y : (7 - y);
+                int bonus = adv * 18;
+                s += (p.team==0) ? bonus : -bonus;
             }
         }
-        
-        return score;
+        return s;
     }
 
-    // Evaluate material imbalance and adjust evaluation accordingly
-    private int EvaluateMaterialImbalance(ChessPiece[,] board, bool isWhiteTurn)
+    private int BishopPair(ChessPiece[,] board)
     {
-        int whiteMaterial = 0;
-        int blackMaterial = 0;
-        
-        for (int x = 0; x < 8; x++)
+        int wb=0, bb=0;
+        for (int x=0;x<8;x++)
+        for (int y=0;y<8;y++)
         {
-            for (int y = 0; y < 8; y++)
-            {
-                if (board[x, y] != null)
-                {
-                    int pieceValue = pieceValues.ContainsKey(board[x, y].type) ? pieceValues[board[x, y].type] : 0;
-                    if (board[x, y].team == 0) // White
-                        whiteMaterial += pieceValue;
-                    else // Black
-                        blackMaterial += pieceValue;
-                }
-            }
+            var p = board[x,y];
+            if (p == null || p.type != ChessPieceType.Bishop) continue;
+            if (p.team==0) wb++; else bb++;
         }
-        
-        int materialDifference = whiteMaterial - blackMaterial;
-        
-        // Adjust evaluation based on material imbalance
-        if (isWhiteTurn)
-        {
-            if (materialDifference > 200) // White is ahead
-                return 100; // Encourage simplification
-            else if (materialDifference < -200) // Black is ahead
-                return -100; // Encourage complications
-        }
-        else
-        {
-            if (materialDifference > 200) // White is ahead
-                return -100; // Encourage complications
-            else if (materialDifference < -200) // Black is ahead
-                return 100; // Encourage simplification
-        }
-        
-        return 0;
+        int s = 0;
+        if (wb >= 2) s += 35;
+        if (bb >= 2) s -= 35;
+        return s;
     }
 
-    // Evaluate endgame-specific factors
-    private int EvaluateEndgame(ChessPiece[,] board, bool isWhiteTurn)
+    private int RookOpenFiles(ChessPiece[,] board)
     {
-        int score = 0;
-        int targetTeam = isWhiteTurn ? 0 : 1;
-        
-        // Count remaining pieces to determine if we're in endgame
-        int totalPieces = 0;
-        int pawns = 0;
-        int queens = 0;
-        
-        for (int x = 0; x < 8; x++)
+        int s = 0;
+        for (int x=0;x<8;x++)
         {
-            for (int y = 0; y < 8; y++)
+            bool hasW=false, hasB=false;
+            for (int y=0;y<8;y++)
             {
-                if (board[x, y] != null)
-                {
-                    totalPieces++;
-                    if (board[x, y].type == ChessPieceType.Pawn) pawns++;
-                    if (board[x, y].type == ChessPieceType.Queen) queens++;
-                }
+                var p = board[x,y];
+                if (p == null || p.type != ChessPieceType.Pawn) continue;
+                if (p.team==0) hasW=true; else hasB=true;
+            }
+            bool openForW = !hasW && !hasB;
+            bool semiForW = !hasW &&  hasB;
+            bool openForB = openForW;
+            bool semiForB = !hasB &&  hasW;
+
+            for (int y=0;y<8;y++)
+            {
+                var r = board[x,y];
+                if (r == null || r.type != ChessPieceType.Rock) continue;
+                if (r.team==0) { if (openForW) s += 25; else if (semiForW) s += 12; }
+                else          { if (openForB) s -= 25; else if (semiForB) s -= 12; }
             }
         }
-        
-        // If we have few pieces, we're in endgame
-        if (totalPieces <= 12)
-        {
-            // In endgame, king activity becomes more important
-            for (int x = 0; x < 8; x++)
-            {
-                for (int y = 0; y < 8; y++)
-                {
-                    if (board[x, y] != null && board[x, y].type == ChessPieceType.King && board[x, y].team == targetTeam)
-                    {
-                        // Use endgame king table
-                        int tableY = targetTeam == 0 ? y : 7 - y;
-                        score += endgameKingPositionTable[tableY, x];
-                        
-                        // Bonus for king centralization in endgame
-                        if (x >= 3 && x <= 4 && y >= 3 && y <= 4)
-                            score += 30;
-                    }
-                }
-            }
-            
-            // Bonus for pawn advancement in endgame
-            for (int x = 0; x < 8; x++)
-            {
-                for (int y = 0; y < 8; y++)
-                {
-                    if (board[x, y] != null && board[x, y].type == ChessPieceType.Pawn && board[x, y].team == targetTeam)
-                    {
-                        int advancement = targetTeam == 0 ? y : (7 - y);
-                        score += advancement * 10;
-                    }
-                }
-            }
-        }
-        
-        return score;
+        return s;
     }
-} 
+
+    private int KingSafety(ChessPiece[,] board)
+    {
+        int s = 0;
+        for (int team=0; team<=1; team++)
+        {
+            ChessPiece k = null;
+            for (int x=0;x<8;x++)
+            {
+                for (int y=0;y<8;y++)
+                {
+                    var p = board[x,y];
+                    if (p!=null && p.team==team && p.type==ChessPieceType.King) { k = p; break; }
+                }
+                if (k!=null) break;
+            }
+            if (k==null) continue;
+
+            int def=0, atk=0;
+            for (int dx=-1; dx<=1; dx++)
+            for (int dy=-1; dy<=1; dy++)
+            {
+                if (dx==0 && dy==0) continue;
+                int cx = k.currentX + dx, cy = k.currentY + dy;
+                if (cx<0||cx>7||cy<0||cy>7) continue;
+                // simple coverage count via attack map
+                if (SquareAttackedByTeam(board, cx, cy, team)) def++;
+                if (SquareAttackedByTeam(board, cx, cy, team^1)) atk++;
+            }
+            s += (team==0) ? (def*2 - atk*3) : -(def*2 - atk*3);
+        }
+        return s;
+    }
+
+    // === Extra helpers ===
+    private bool IsEndgameish(ChessPiece[,] board)
+    {
+        int nonPawn = 0;
+        for (int x=0;x<8;x++)
+        for (int y=0;y<8;y++)
+        {
+            var p = board[x,y];
+            if (p == null) continue;
+            if (p.type == ChessPieceType.Pawn || p.type == ChessPieceType.King) continue;
+            nonPawn += val[p.type];
+        }
+        return nonPawn <= 2 * val[ChessPieceType.Rock];
+    }
+
+    private int NullMoveReduction(int depth) => (depth >= 6 ? 3 : 2);
+
+    private int CountAttackers(ChessPiece[,] board, int team, int tx, int ty)
+    {
+        int cnt = 0;
+        // Use attack map instead of GetAvailableMoves (robust)
+        if (SquareAttackedByTeam(board, tx, ty, team)) cnt++; // at least 1; we only need relative count
+        return cnt;
+    }
+
+    private bool IsClearlyLosingCapture(ChessPiece[,] board, PackedMove m)
+    {
+        var from = board[m.fx, m.fy];
+        var to   = board[m.tx, m.ty];
+        if (to == null || to.team == from.team) return false;
+
+        int swing = val[to.type] - val[from.type];
+        if (swing >= -50) return false;
+
+        var after = Apply(board, m);
+        int enemy = from.team ^ 1;
+        int our   = from.team;
+        int atk = CountAttackers(after, enemy, m.tx, m.ty);
+        int def = CountAttackers(after, our,   m.tx, m.ty);
+        return atk > def + 1;
+    }
+
+    // === TT and hashing ===
+    private void StoreTT(ulong key, int depth, int value, TTFlag flag, bool sideToMove, PackedMove best)
+    {
+        tt[key] = new TTEntry { depth = depth, value = value, flag = flag, sideToMove = sideToMove, best = best };
+    }
+
+    private static ulong Rand64()
+    {
+        var hi = (ulong)(uint)rng64.Next(int.MinValue, int.MaxValue);
+        var lo = (ulong)(uint)rng64.Next(int.MinValue, int.MaxValue);
+        return (hi << 32) ^ lo;
+    }
+
+    private static void InitZobrist()
+    {
+        if (zobristInit) return;
+        for (int x=0;x<8;x++)
+            for (int y=0;y<8;y++)
+                for (int k=0;k<12;k++)
+                    zobrist[x,y,k] = Rand64();
+        zobristSideToMove = Rand64();
+        zobristInit = true;
+    }
+
+    private ulong Hash(ChessPiece[,] board, bool isWhiteTurn)
+    {
+        ulong h = 0;
+        for (int x=0;x<8;x++)
+        for (int y=0;y<8;y++)
+        {
+            var p = board[x,y];
+            if (p == null) continue;
+            int typeIndex = p.type switch
+            {
+                ChessPieceType.Pawn   => 0,
+                ChessPieceType.Knight => 1,
+                ChessPieceType.Bishop => 2,
+                ChessPieceType.Rock   => 3,
+                ChessPieceType.Queen  => 4,
+                ChessPieceType.King   => 5,
+                _ => 0
+            };
+            int id = p.team * 6 + typeIndex;
+            h ^= zobrist[x,y,id];
+        }
+        if (!isWhiteTurn) h ^= zobristSideToMove;
+        return h;
+    }
+
+    // === Time ===
+    private bool timeExceeded()
+    {
+        if (timeUp) return true;
+        if ((Time.realtimeSinceStartup * 1000f - startMs) > MAX_SEARCH_TIME_MS)
+            timeUp = true;
+        return timeUp;
+    }
+}

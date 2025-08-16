@@ -1035,13 +1035,7 @@ public class Chessboard : MonoBehaviour
             {
                 AutoAssignChessAI();
             }
-            
-            // Reset opening strategy for variety
-            if (chessAI != null)
-            {
-                // Force the ChessAI to choose a new opening strategy
-                chessAI.ResetOpeningStrategy();
-            }
+        
             
             // Cancel any existing bot move invocations to prevent duplicates
             CancelInvoke(nameof(MakeBotMove));
@@ -1138,9 +1132,6 @@ public class Chessboard : MonoBehaviour
                 return;
             }
         }
-
-        // Pass current move count to ChessAI for opening detection
-        chessAI.SetMoveCount(moveList.Count);
 
         isBotThinking = true;
         Debug.Log("Bot is thinking...");
