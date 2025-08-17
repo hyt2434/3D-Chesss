@@ -79,7 +79,12 @@ public class GameTimer : MonoBehaviour
                 winningScreen.SetActive(true);
                 int winnerIndex = whiteWins ? 0 : 1; // 0=WHITE WINS, 1=BLACK WINS
                 if (winnerIndex < winningScreen.transform.childCount)
+                {
                     winningScreen.transform.GetChild(winnerIndex).gameObject.SetActive(true);
+                }
+                winningScreen.transform.GetChild(3).gameObject.SetActive(true); // show restart button
+                winningScreen.transform.GetChild(4).gameObject.SetActive(true); // show exit button
+                
             }
 
             Debug.Log(whiteWins ? "⏰ Black flagged — White wins!"
@@ -127,31 +132,33 @@ public class GameTimer : MonoBehaviour
     {
         string currentPlayerName = PlayerPrefs.GetString("CurrentPlayerName", "");
         int currentPlayerAge = PlayerPrefs.GetInt("CurrentPlayerAge", -1);
-        
-        if (string.IsNullOrEmpty(currentPlayerName) || currentPlayerAge == -1)
-        {
-            Debug.LogWarning("No current player data found for time-based ranking update");
-            return;
-        }
+        string opponentName = PlayerPrefs.GetString("OpponentName", "");
+        int opponentAge = PlayerPrefs.GetInt("OpponentAge", -1);
 
-        // Get current player data
+    
+        if (string.IsNullOrEmpty(currentPlayerName) || currentPlayerAge == -1) return;
         PlayerData currentPlayer = PlayerRanking.Instance.GetPlayerData(currentPlayerName, currentPlayerAge);
-        if (currentPlayer == null)
-        {
-            Debug.LogWarning($"Player data not found for {currentPlayerName} ({currentPlayerAge})");
-            return;
-        }
+        if (currentPlayer == null) return;
 
-        // Determine if current player won (assuming current player is white)
-        bool currentPlayerWon = whiteWins;
-        
-        // Update player stats and ranking
+        bool currentPlayerWon = whiteWins; 
         int rankingChange = currentPlayerWon ? 32 : -32;
+
+ 
         int newRanking = Mathf.Max(0, currentPlayer.rankingPoints + rankingChange);
-        
         PlayerRanking.Instance.UpdatePlayerStats(currentPlayerName, currentPlayerAge, currentPlayerWon);
         PlayerRanking.Instance.UpdatePlayerRanking(currentPlayerName, currentPlayerAge, newRanking);
-        
-        Debug.Log($"Player {currentPlayerName} ranking updated (time win): {currentPlayer.rankingPoints} -> {newRanking} ({rankingChange:+0;-0})");
+
+        if (!string.IsNullOrEmpty(opponentName) && opponentAge != -1)
+        {
+            PlayerData opponent = PlayerRanking.Instance.GetPlayerData(opponentName, opponentAge);
+            if (opponent != null)
+            {
+                int opponentChange = -rankingChange;
+                int opponentNew = Mathf.Max(0, opponent.rankingPoints + opponentChange);
+                PlayerRanking.Instance.UpdatePlayerStats(opponentName, opponentAge, !currentPlayerWon);
+                PlayerRanking.Instance.UpdatePlayerRanking(opponentName, opponentAge, opponentNew);
+            }
+        }
     }
+
 }
