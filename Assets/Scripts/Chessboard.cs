@@ -405,19 +405,22 @@ public class Chessboard : MonoBehaviour
         winningScreen.transform.GetChild(victoryTeam).gameObject.SetActive(true);
     }
 
-    /// <summary>
-    /// Update player rankings after a game ends
-    /// </summary>
     private void UpdatePlayerRankings(int winningTeam)
     {
-        // Only apply multiplayer scoring if this is a multiplayer game
+        // --- DRAW: do nothing ---
+        if (winningTeam == 2)
+        {
+            Debug.Log("Game ended in a draw — no points or ranking changes.");
+            return; // << early exit: no bonus, no penalties
+        }
+
+        // Bot game scoring
         if (isBotGame)
         {
             Debug.Log("Bot game - using standard ranking system");
-            // Use standard ranking system for bot games
             string currentPlayerName = PlayerPrefs.GetString("CurrentPlayerName", "");
             int currentPlayerAge = PlayerPrefs.GetInt("CurrentPlayerAge", -1);
-            
+
             if (string.IsNullOrEmpty(currentPlayerName) || currentPlayerAge == -1)
             {
                 Debug.LogWarning("No current player data found for ranking update");
@@ -431,30 +434,31 @@ public class Chessboard : MonoBehaviour
                 return;
             }
 
-            bool currentPlayerWon = (winningTeam == 0);
+            // If you keep this line, bot results will assume player is always White.
+            // Better:
+            bool currentPlayerWon = (winningTeam == (isPlayerWhite ? 0 : 1)); // 0=White,1=Black
             int rankingChange = currentPlayerWon ? 32 : -32;
             int newRanking = Mathf.Max(0, currentPlayer.rankingPoints + rankingChange);
-            
+
             PlayerRanking.Instance.UpdatePlayerStats(currentPlayerName, currentPlayerAge, currentPlayerWon);
             PlayerRanking.Instance.UpdatePlayerRanking(currentPlayerName, currentPlayerAge, newRanking);
-            
+
             Debug.Log($"Player {currentPlayerName} ranking updated: {currentPlayer.rankingPoints} -> {newRanking} ({rankingChange:+0;-0})");
             return;
         }
-        
-        // Multiplayer game scoring system
+
+        // --- Multiplayer scoring ---
         string multiplayerPlayerName = PlayerPrefs.GetString("CurrentPlayerName", "");
         int multiplayerPlayerAge = PlayerPrefs.GetInt("CurrentPlayerAge", -1);
         string opponentName = PlayerPrefs.GetString("OpponentName", "");
         int opponentAge = PlayerPrefs.GetInt("OpponentAge", -1);
-        
+
         if (string.IsNullOrEmpty(multiplayerPlayerName) || multiplayerPlayerAge == -1)
         {
             Debug.LogWarning("No current player data found for ranking update");
             return;
         }
 
-        // Get current player data
         PlayerData multiplayerPlayer = PlayerRanking.Instance.GetPlayerData(multiplayerPlayerName, multiplayerPlayerAge);
         if (multiplayerPlayer == null)
         {
@@ -462,50 +466,40 @@ public class Chessboard : MonoBehaviour
             return;
         }
 
-        // Determine if current player won
-        // Assuming current player is always white (team 0) for simplicity
         bool multiplayerPlayerWon = (winningTeam == 0); // 0 = white, 1 = black
-        
-        // Multiplayer scoring system
-        int currentPlayerPoints = 0;
-        int opponentPoints = 0;
-        
+
+        int currentPlayerPoints, opponentPoints;
         if (multiplayerPlayerWon)
         {
-            // Current player wins: +150 points
             currentPlayerPoints = 150;
             opponentPoints = -50;
         }
         else
         {
-            // Current player loses: -50 points
             currentPlayerPoints = -50;
             opponentPoints = 150;
         }
-        
-        // Add bonus points for captured pieces
+
+        // Capture bonus stays ONLY for win/loss (draw already returned above)
         int currentPlayerCaptureBonus = CalculateCaptureBonus(winningTeam == 0 ? deadBlacks.Count : deadWhites.Count);
         int opponentCaptureBonus = CalculateCaptureBonus(winningTeam == 0 ? deadWhites.Count : deadBlacks.Count);
-        
-        // Use ScoreManager for more accurate capture tracking
+
         if (scoreManager != null)
         {
-            currentPlayerCaptureBonus = scoreManager.GetCapturedPiecesValue(winningTeam == 0 ? 1 : 0); // Opponent's team
-            opponentCaptureBonus = scoreManager.GetCapturedPiecesValue(winningTeam == 0 ? 0 : 1); // Current player's team
+            currentPlayerCaptureBonus = scoreManager.GetCapturedPiecesValue(winningTeam == 0 ? 1 : 0);
+            opponentCaptureBonus = scoreManager.GetCapturedPiecesValue(winningTeam == 0 ? 0 : 1);
         }
-        
+
         currentPlayerPoints += currentPlayerCaptureBonus;
         opponentPoints += opponentCaptureBonus;
-        
-        // Update current player ranking
+
         int newCurrentPlayerRanking = Mathf.Max(0, multiplayerPlayer.rankingPoints + currentPlayerPoints);
         PlayerRanking.Instance.UpdatePlayerStats(multiplayerPlayerName, multiplayerPlayerAge, multiplayerPlayerWon);
         PlayerRanking.Instance.UpdatePlayerRanking(multiplayerPlayerName, multiplayerPlayerAge, newCurrentPlayerRanking);
-        
+
         Debug.Log($"Player {multiplayerPlayerName} ranking updated: {multiplayerPlayer.rankingPoints} -> {newCurrentPlayerRanking} ({currentPlayerPoints:+0;-0})");
         Debug.Log($"Capture bonus: {currentPlayerCaptureBonus} points");
-        
-        // Update opponent ranking if opponent exists in the system
+
         if (!string.IsNullOrEmpty(opponentName) && opponentAge != -1)
         {
             PlayerData opponent = PlayerRanking.Instance.GetPlayerData(opponentName, opponentAge);
@@ -514,7 +508,7 @@ public class Chessboard : MonoBehaviour
                 int newOpponentRanking = Mathf.Max(0, opponent.rankingPoints + opponentPoints);
                 PlayerRanking.Instance.UpdatePlayerStats(opponentName, opponentAge, !multiplayerPlayerWon);
                 PlayerRanking.Instance.UpdatePlayerRanking(opponentName, opponentAge, newOpponentRanking);
-                
+
                 Debug.Log($"Opponent {opponentName} ranking updated: {opponent.rankingPoints} -> {newOpponentRanking} ({opponentPoints:+0;-0})");
                 Debug.Log($"Opponent capture bonus: {opponentCaptureBonus} points");
             }

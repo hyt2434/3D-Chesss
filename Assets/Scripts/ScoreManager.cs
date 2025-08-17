@@ -20,11 +20,6 @@ public class ScoreManager : MonoBehaviour
         ResetScores();
     }
 
-    /// <summary>
-    /// Call this whenever a side captures a piece.
-    /// team: 0=White, 1=Black
-    /// points: standard chess piece values.
-    /// </summary>
     public void AddPoints(int team, int points)
     {
         if (team == 0) whiteScore += points;
@@ -33,9 +28,6 @@ public class ScoreManager : MonoBehaviour
         UpdateUI();
     }
     
-    /// <summary>
-    /// Track a captured piece for multiplayer scoring
-    /// </summary>
     public void TrackCapturedPiece(int capturedTeam, ChessPieceType pieceType)
     {
         if (capturedTeam == 0) // White piece captured
@@ -48,9 +40,6 @@ public class ScoreManager : MonoBehaviour
         }
     }
     
-    /// <summary>
-    /// Get the total value of captured pieces for a team
-    /// </summary>
     public int GetCapturedPiecesValue(int team)
     {
         List<ChessPieceType> capturedPieces = (team == 0) ? capturedWhitePieces : capturedBlackPieces;
@@ -64,17 +53,11 @@ public class ScoreManager : MonoBehaviour
         return totalValue;
     }
     
-    /// <summary>
-    /// Get the number of captured pieces for a team
-    /// </summary>
     public int GetCapturedPiecesCount(int team)
     {
         return (team == 0) ? capturedWhitePieces.Count : capturedBlackPieces.Count;
     }
     
-    /// <summary>
-    /// Get the standard chess piece value
-    /// </summary>
     private int GetPieceValue(ChessPieceType pieceType)
     {
         return pieceType switch
@@ -88,9 +71,6 @@ public class ScoreManager : MonoBehaviour
         };
     }
 
-    /// <summary>
-    /// Reset both scores to zero and update the labels.
-    /// </summary>
     public void ResetScores()
     {
         whiteScore = 0;
