@@ -201,6 +201,9 @@ public class PlayerMenuController : MonoBehaviour
 
         // Add new player with default 1000 ranking points
         PlayerRanking.Instance.AddNewPlayer(name, age);
+        PlayerPrefs.SetString("CurrentPlayerName", name);
+        PlayerPrefs.SetInt("CurrentPlayerAge", age);
+        PlayerPrefs.Save();
 
         SceneManager.LoadScene("MainMenu");
     }
