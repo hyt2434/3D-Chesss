@@ -305,4 +305,11 @@ public class PlayerMenuController : MonoBehaviour
             playButton.SetActive(false);
         }
     }
+    public void OnQuitGame()
+    {
+        Debug.LogWarning("Quit game");
+        // Quit the application
+        Application.Quit();
+
+    }
 }
